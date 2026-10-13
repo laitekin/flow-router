@@ -56,6 +56,7 @@ func (rt *Runtime) buildUpstreamHTTPRequest(
 	}
 	// 请求相关 ID 原样转发上游；网关只在响应侧写 X-Upstream-Ops-Request-Id
 	rt.copyClientRequestIDHeaders(req.Header, inHeader)
+	copyClientSessionHeaders(req.Header, inHeader)
 	if upKind == protocol.KindAnthropic {
 		if v := inHeader.Get("anthropic-version"); v != "" {
 			req.Header.Set("anthropic-version", v)

@@ -407,4 +407,36 @@ var clientRequestIDHeaders = []string{
 	"Request-Id",
 }
 
+// clientSessionHeaders 客户端会话 / 粘性相关头：原样透传到上游。
+// 上游若是 sub2api，会据此把同一会话粘在同一账号上（prompt cache 命中）；
+// 丢掉这些头会让上游退化为按内容 hash 选号，Codex turn-state 也会断。
+var clientSessionHeaders = []string{
+	"session_id",
+	"session-id",
+	"conversation_id",
+	"X-Session-Affinity",
+	"X-Session-Id",
+	"X-OpenCode-Session",
+	"X-Conversation-ID",
+	"X-Claude-Code-Session-Id",
+	"originator",
+	"X-Codex-Beta-Features",
+	"X-Codex-Installation-Id",
+	"X-Codex-Turn-State",
+	"X-Codex-Turn-Metadata",
+	"X-Codex-Window-Id",
+}
+
+// copyClientSessionHeaders 把入站会话相关头原样写到上游请求。
+func copyClientSessionHeaders(dst, src http.Header) {
+	if dst == nil || src == nil {
+		return
+	}
+	for _, h := range clientSessionHeaders {
+		if v := strings.TrimSpace(src.Get(h)); v != "" {
+			dst.Set(h, v)
+		}
+	}
+}
+
 // copyClientRequestIDHeaders 把入站请求相关 ID 原样写到上游请求；不碰 X-Upstream-Ops-Request-Id。

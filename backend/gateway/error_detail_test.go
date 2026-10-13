@@ -191,6 +191,28 @@ func TestEnsureGatewayRequestID_IgnoresClientHeaders(t *testing.T) {
 	}
 }
 
+func TestCopyClientSessionHeaders_Passthrough(t *testing.T) {
+	src := http.Header{}
+	src.Set("session_id", "sess-1")
+	src.Set("X-Claude-Code-Session-Id", "cc-1")
+	src.Set("X-Codex-Turn-State", "ts-1")
+	src.Set("Authorization", "Bearer secret")
+	dst := http.Header{}
+	copyClientSessionHeaders(dst, src)
+	if got := dst.Get("session_id"); got != "sess-1" {
+		t.Fatalf("session_id=%q", got)
+	}
+	if got := dst.Get("X-Claude-Code-Session-Id"); got != "cc-1" {
+		t.Fatalf("X-Claude-Code-Session-Id=%q", got)
+	}
+	if got := dst.Get("X-Codex-Turn-State"); got != "ts-1" {
+		t.Fatalf("X-Codex-Turn-State=%q", got)
+	}
+	if dst.Get("Authorization") != "" {
+		t.Fatal("must not forward Authorization via session helper")
+	}
+}
+
 func TestCopyClientRequestIDHeaders_Passthrough(t *testing.T) {
 	src := http.Header{}
 	src.Set("X-Request-Id", "019f51b1-f52c-74c1-9370-db09bab43ffb")
