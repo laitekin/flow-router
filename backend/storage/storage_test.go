@@ -1765,3 +1765,52 @@ func TestGatewayUsageChainResultModesMatchDispatchOutcomes(t *testing.T) {
 		}
 	}
 }
+
+func TestGatewayUsageListOmitsErrorPayload(t *testing.T) {
+	db := openTestDB(t)
+	usage := NewGatewayUsageLogs(db)
+	now := time.Now()
+	rows := []GatewayUsageLog{
+		{RequestID: "ok-1", RequestedModel: "m", Success: true, ActualCost: 1, CreatedAt: now.Add(-time.Minute)},
+		{RequestID: "fail-1", RequestedModel: "m", Success: false, ErrorType: "http", ErrorMessage: "boom",
+			UpstreamErrorBody: `{"error":"x"}`, UpstreamErrorHeaders: `[{"name":"A","values":["1"]}]`, ActualCost: 2, CreatedAt: now},
+		{RequestID: "fail-2", RequestedModel: "m", Success: false, ErrorType: "transport", ErrorMessage: "eof", ActualCost: 0, CreatedAt: now},
+		{RequestID: "old", RequestedModel: "m", Success: true, ActualCost: 5, CreatedAt: now.Add(-48 * time.Hour)},
+	}
+	for i := range rows {
+		if err := usage.Create(&rows[i]); err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+	}
+
+	from := now.Add(-time.Hour)
+	page, err := usage.List(GatewayUsageQuery{From: &from, Page: 1, PageSize: 50})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if page.Total != 3 || page.SumCost != 3 {
+		t.Fatalf("total/sum = %d/%v, want 3/3", page.Total, page.SumCost)
+	}
+	byReq := map[string]GatewayUsageLogItem{}
+	for _, it := range page.Items {
+		byReq[it.RequestID] = it
+	}
+	f1 := byReq["fail-1"]
+	if f1.UpstreamErrorBody != "" || f1.UpstreamErrorHeaders != "" {
+		t.Fatalf("list should omit error payload, got body=%q headers=%q", f1.UpstreamErrorBody, f1.UpstreamErrorHeaders)
+	}
+	if !f1.HasErrorPayload || f1.ErrorMessage != "boom" {
+		t.Fatalf("fail-1 should flag payload and keep message: %+v", f1)
+	}
+	if byReq["fail-2"].HasErrorPayload || byReq["ok-1"].HasErrorPayload {
+		t.Fatalf("rows without payload must not be flagged")
+	}
+
+	detail, err := usage.Get(f1.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if detail.UpstreamErrorBody != `{"error":"x"}` || detail.UpstreamErrorHeaders == "" {
+		t.Fatalf("detail should carry full payload: %+v", detail)
+	}
+}

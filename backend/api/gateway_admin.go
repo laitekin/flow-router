@@ -4,6 +4,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/bejix/upstream-ops/backend/gateway"
 	"github.com/bejix/upstream-ops/backend/storage"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // registerGatewayAdmin 在管理 API 下注册 /gateway/* 路由。
@@ -69,6 +71,7 @@ func registerGatewayAdmin(g *gin.RouterGroup, d *Deps) {
 		gp.GET("/usage", func(c *gin.Context) { listGatewayUsage(c, d) })
 		gp.GET("/usage/stats", func(c *gin.Context) { statsGatewayUsage(c, d) })
 		gp.GET("/usage/models", func(c *gin.Context) { listGatewayUsageModels(c, d) })
+		gp.GET("/usage/detail/:id", func(c *gin.Context) { getGatewayUsageDetail(c, d) })
 		gp.POST("/usage/cleanup", func(c *gin.Context) { cleanupGatewayUsage(c, d) })
 
 		// prices
@@ -762,12 +765,37 @@ func listGatewayUsage(c *gin.Context, d *Deps) {
 
 func statsGatewayUsage(c *gin.Context, d *Deps) {
 	q := parseGatewayUsageQuery(c)
+	// 后台不展示端点分布，跳过那次全量 GROUP BY
+	q.SkipEndpoints = true
 	stats, err := d.GatewayUsage.Stats(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, stats)
+}
+
+// getGatewayUsageDetail 单条使用记录完整内容（列表省略的上游错误 body / header 等）。
+func getGatewayUsageDetail(c *gin.Context, d *Deps) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if d.GatewayUsage == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage storage unavailable"})
+		return
+	}
+	item, err := d.GatewayUsage.Get(uint(id))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "记录不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, item)
 }
 
 // listGatewayUsageModels 使用记录中出现过的模型聚合（下拉选项）。

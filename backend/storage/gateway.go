@@ -2103,7 +2103,17 @@ type GatewayUsageQuery struct {
 	To         *time.Time
 	Page       int
 	PageSize   int
+	// SkipEndpoints 不做按入站端点的分组统计（管理后台不展示，省一次全量 GROUP BY）
+	SkipEndpoints bool
 }
+
+// usageListOmitColumns 列表不带的大字段：上游错误 body / header 动辄几十 KB，
+// 一页 200 条失败记录能拖出几 MB 响应。展开详情时再走 Get 单条拉取。
+var usageListOmitColumns = []string{"error_detail", "upstream_error_body", "upstream_error_headers"}
+
+// chainTimePad 链路子查询的时间窗外扩量：同一 request_id 的多次尝试跨度通常在
+// 几分钟内，外扩后既能用上时间索引，又不会把窗口边缘的链截断。
+const chainTimePad = 6 * time.Hour
 
 // GatewayUsageLogItem 列表展示用：原始日志 + 关联名称（非多租户用户字段）。
 // 源分组 / 上游密钥名优先用日志快照字段（GatewayUsageLog.Source*）；
@@ -2114,6 +2124,8 @@ type GatewayUsageLogItem struct {
 	GatewayGroupName string `json:"gateway_group_name,omitempty"`
 	ChannelName      string `json:"channel_name,omitempty"`
 	// ProviderName 直连渠道名：优先日志快照，否则 enrich 回填
+	// HasErrorPayload 列表省略了大字段时，标记该行是否还有可展开的错误详情
+	HasErrorPayload bool `json:"has_error_payload,omitempty"`
 }
 
 type GatewayUsagePage struct {
@@ -2184,6 +2196,9 @@ func (r *GatewayUsageLogs) applyFilters(db *gorm.DB, q GatewayUsageQuery) *gorm.
 		db = db.Where("request_type = ?", *q.RequestType)
 	}
 	mode := strings.ToLower(strings.TrimSpace(q.ResultMode))
+	// 链路子查询原本对全表 GROUP BY request_id，数据量一大每次筛选都是全表扫描；
+	// 按外扩后的时间窗收窄（外层仍按精确时间窗过滤）。
+	chainCond, chainArgs := usageTimeCond(db, padTime(q.From, -chainTimePad), padTime(q.To, chainTimePad))
 	switch mode {
 	case "success":
 		// 纯成功：不含客户端断开（新逻辑 success=true + error_type=client）
@@ -2205,23 +2220,23 @@ func (r *GatewayUsageLogs) applyFilters(db *gorm.DB, q GatewayUsageQuery) *gorm.
 		db = db.Where(
 			`request_id != '' AND request_id IN (
 				SELECT request_id FROM gateway_usage_logs
-				WHERE request_id != '' AND request_id IS NOT NULL
+				WHERE request_id != '' AND request_id IS NOT NULL`+chainCond+`
 				GROUP BY request_id
 				HAVING COUNT(*) > 1 OR MAX(attempt) > 1
 					OR SUM(CASE WHEN attempt_kind IN ('retry','failover') THEN 1 ELSE 0 END) > 0
-			)`,
+			)`, chainArgs...,
 		)
 	case "multi_success", "failover_success", "chain_success":
 		// 最终成功且链路有多次尝试（展示上即「成功 2/2 · 顺延」一类）
 		db = db.Where(
 			`request_id != '' AND request_id IN (
 				SELECT request_id FROM gateway_usage_logs
-				WHERE request_id != '' AND request_id IS NOT NULL
+				WHERE request_id != '' AND request_id IS NOT NULL`+chainCond+`
 				GROUP BY request_id
 				HAVING (COUNT(*) > 1 OR MAX(attempt) > 1
 					OR SUM(CASE WHEN attempt_kind IN ('retry','failover') THEN 1 ELSE 0 END) > 0)
 					AND SUM(CASE WHEN success = 1 OR success = true THEN 1 ELSE 0 END) > 0
-			)`,
+			)`, chainArgs...,
 		)
 	case "chain_direct", "chain_recovered", "chain_failed":
 		// 链级结局：先按 request_id 归组拿到「最后一次尝试」（id 单调递增，最大的那条
@@ -2240,21 +2255,21 @@ func (r *GatewayUsageLogs) applyFilters(db *gorm.DB, q GatewayUsageQuery) *gorm.
 			SELECT c.last_id FROM (
 				SELECT request_id, MAX(id) AS last_id, COUNT(*) AS attempts
 				FROM gateway_usage_logs
-				WHERE request_id != '' AND request_id IS NOT NULL
+				WHERE request_id != '' AND request_id IS NOT NULL`+chainCond+`
 				GROUP BY request_id
 			) c JOIN gateway_usage_logs f ON f.id = c.last_id
-			WHERE ` + cond + `
-		)`)
+			WHERE `+cond+`
+		)`, chainArgs...)
 	case "multi_fail", "chain_fail":
 		db = db.Where(
 			`request_id != '' AND request_id IN (
 				SELECT request_id FROM gateway_usage_logs
-				WHERE request_id != '' AND request_id IS NOT NULL
+				WHERE request_id != '' AND request_id IS NOT NULL`+chainCond+`
 				GROUP BY request_id
 				HAVING (COUNT(*) > 1 OR MAX(attempt) > 1
 					OR SUM(CASE WHEN attempt_kind IN ('retry','failover') THEN 1 ELSE 0 END) > 0)
 					AND SUM(CASE WHEN success = 1 OR success = true THEN 1 ELSE 0 END) = 0
-			)`,
+			)`, chainArgs...,
 		)
 	default:
 		// all 或空：兼容旧 SuccessOnly
@@ -2262,25 +2277,52 @@ func (r *GatewayUsageLogs) applyFilters(db *gorm.DB, q GatewayUsageQuery) *gorm.
 			db = db.Where("success = ?", *q.SuccessOnly)
 		}
 	}
-	// 时间过滤：SQLite 存的是带时区的文本（如 "2026-07-14 18:40:18+08:00"），
-	// 若直接与 RFC3339（含 T 的 ISO）字符串比较会得到 0 行（"近1小时"失效）。
-	// 统一用 unix 秒比较。注意：strftime('%s', …) 返回 TEXT，
-	// 与整数绑定参数比较在 SQLite 下会得到 0 行，必须 CAST 成 INTEGER。
-	if q.From != nil {
-		if isSQLite(db) {
-			db = db.Where("CAST(strftime('%s', created_at) AS INTEGER) >= ?", q.From.Unix())
-		} else {
-			db = db.Where("created_at >= ?", *q.From)
-		}
-	}
-	if q.To != nil {
-		if isSQLite(db) {
-			db = db.Where("CAST(strftime('%s', created_at) AS INTEGER) <= ?", q.To.Unix())
-		} else {
-			db = db.Where("created_at <= ?", *q.To)
-		}
+	if cond, args := usageTimeCond(db, q.From, q.To); cond != "" {
+		db = db.Where(strings.TrimPrefix(cond, " AND "), args...)
 	}
 	return db
+}
+
+// usageTimeCond 生成 created_at 时间窗条件（以 " AND " 开头，便于拼进子查询）。
+//
+// SQLite 存的是带时区的文本（如 "2026-07-14 18:40:18+08:00"），
+// 若直接与 RFC3339（含 T 的 ISO）字符串比较会得到 0 行（"近1小时"失效）。
+// 统一用 unix 秒比较。注意：strftime('%s', …) 返回 TEXT，
+// 与整数绑定参数比较在 SQLite 下会得到 0 行，必须 CAST 成 INTEGER。
+// 表达式须与 ensureGatewayUsageIndexes 里的索引逐字一致，否则走不到索引。
+func usageTimeCond(db *gorm.DB, from, to *time.Time) (string, []any) {
+	var (
+		cond string
+		args []any
+	)
+	sqlite := isSQLite(db)
+	if from != nil {
+		if sqlite {
+			cond += " AND CAST(strftime('%s', created_at) AS INTEGER) >= ?"
+			args = append(args, from.Unix())
+		} else {
+			cond += " AND created_at >= ?"
+			args = append(args, *from)
+		}
+	}
+	if to != nil {
+		if sqlite {
+			cond += " AND CAST(strftime('%s', created_at) AS INTEGER) <= ?"
+			args = append(args, to.Unix())
+		} else {
+			cond += " AND created_at <= ?"
+			args = append(args, *to)
+		}
+	}
+	return cond, args
+}
+
+func padTime(t *time.Time, d time.Duration) *time.Time {
+	if t == nil {
+		return nil
+	}
+	v := t.Add(d)
+	return &v
 }
 
 func isSQLite(db *gorm.DB) bool {
@@ -2301,21 +2343,31 @@ func (r *GatewayUsageLogs) List(q GatewayUsageQuery) (*GatewayUsagePage, error) 
 	if q.PageSize > 200 {
 		q.PageSize = 200
 	}
-	db := r.applyFilters(r.db.Model(&GatewayUsageLog{}), q)
-	var total int64
-	if err := db.Count(&total).Error; err != nil {
+	// 总数与费用合计一次聚合拿到（原先 Count + SUM 各扫一遍）
+	var agg struct {
+		Total int64
+		Sum   float64
+	}
+	if err := r.applyFilters(r.db.Model(&GatewayUsageLog{}), q).
+		Select("COUNT(*) AS total, COALESCE(SUM(actual_cost),0) AS sum").
+		Scan(&agg).Error; err != nil {
 		return nil, err
 	}
-	var sum float64
-	_ = db.Session(&gorm.Session{}).Select("COALESCE(SUM(actual_cost),0)").Scan(&sum).Error
+	total, sum := agg.Total, agg.Sum
 
 	var rows []GatewayUsageLog
 	offset := (q.Page - 1) * q.PageSize
-	if err := db.Order("id DESC").Offset(offset).Limit(q.PageSize).Find(&rows).Error; err != nil {
+	if err := r.applyFilters(r.db.Model(&GatewayUsageLog{}), q).
+		Omit(usageListOmitColumns...).
+		Order("id DESC").Offset(offset).Limit(q.PageSize).
+		Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	items, err := r.enrichUsageItems(rows)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.markErrorPayload(items); err != nil {
 		return nil, err
 	}
 	pages := int(total) / q.PageSize
@@ -2330,6 +2382,52 @@ func (r *GatewayUsageLogs) List(q GatewayUsageQuery) (*GatewayUsagePage, error) 
 		Pages:    pages,
 		SumCost:  sum,
 	}, nil
+}
+
+// markErrorPayload 给失败 / 客户端断开的行标记是否还有被列表省略的错误大字段。
+// 只按主键查本页最多 200 个 id，开销可忽略。
+func (r *GatewayUsageLogs) markErrorPayload(items []GatewayUsageLogItem) error {
+	ids := make([]uint, 0)
+	for _, it := range items {
+		if !it.Success || it.ErrorType == "client" {
+			ids = append(ids, it.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	var hit []uint
+	if err := r.db.Model(&GatewayUsageLog{}).
+		Where("id IN ?", ids).
+		Where("(error_detail IS NOT NULL AND error_detail <> '') OR "+
+			"(upstream_error_body IS NOT NULL AND upstream_error_body <> '') OR "+
+			"(upstream_error_headers IS NOT NULL AND upstream_error_headers <> '')").
+		Pluck("id", &hit).Error; err != nil {
+		return err
+	}
+	set := make(map[uint]struct{}, len(hit))
+	for _, id := range hit {
+		set[id] = struct{}{}
+	}
+	for i := range items {
+		if _, ok := set[items[i].ID]; ok {
+			items[i].HasErrorPayload = true
+		}
+	}
+	return nil
+}
+
+// Get 单条完整记录（含列表省略的错误大字段），供展开详情。
+func (r *GatewayUsageLogs) Get(id uint) (*GatewayUsageLogItem, error) {
+	var row GatewayUsageLog
+	if err := r.db.First(&row, id).Error; err != nil {
+		return nil, err
+	}
+	items, err := r.enrichUsageItems([]GatewayUsageLog{row})
+	if err != nil {
+		return nil, err
+	}
+	return &items[0], nil
 }
 
 // enrichUsageItems 补全用量展示字段。
@@ -2566,13 +2664,15 @@ func (r *GatewayUsageLogs) Stats(q GatewayUsageQuery) (*GatewayUsageStats, error
 		return nil, err
 	}
 	var endpoints []GatewayEndpointStat
-	_ = r.applyFilters(r.db.Model(&GatewayUsageLog{}), q).
-		Select("inbound_endpoint as endpoint, COUNT(*) as requests").
-		Where("inbound_endpoint <> ''").
-		Group("inbound_endpoint").
-		Order("requests DESC").
-		Limit(20).
-		Scan(&endpoints).Error
+	if !q.SkipEndpoints {
+		_ = r.applyFilters(r.db.Model(&GatewayUsageLog{}), q).
+			Select("inbound_endpoint as endpoint, COUNT(*) as requests").
+			Where("inbound_endpoint <> ''").
+			Group("inbound_endpoint").
+			Order("requests DESC").
+			Limit(20).
+			Scan(&endpoints).Error
+	}
 
 	totalTokens := row.TotalInputTokens + row.TotalOutputTokens + row.TotalCacheCreationTokens + row.TotalCacheReadTokens
 	rpm, tpm := r.performanceRPMAndTPM(q)
