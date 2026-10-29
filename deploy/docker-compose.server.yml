@@ -1,16 +1,71 @@
 name: flow-router
 
+# 生产服务器部署：应用 + 独立的 PostgreSQL / Redis（不与同机 sub2api、aiferry 的库共用）。
+#
+# .env 需要：APP_SECRET、ADMIN_PASSWORD、AUTH_TOKEN_SECRET、FLOW_ROUTER_DATA_DIR、
+#           FLOW_ROUTER_PG_PASSWORD、FLOW_ROUTER_TAG（本地构建的镜像 tag）
+#
+# 从旧 SQLite 迁移（只需一次，目标库必须为空）：
+#   docker compose -f deploy/docker-compose.server.yml --env-file .env up -d postgres redis
+#   docker compose -f deploy/docker-compose.server.yml --env-file .env run --rm app \
+#     migrate-db -config /app/data/config.yaml -from-path /app/data/upstream-ops.db
+
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      POSTGRES_DB: flowrouter
+      POSTGRES_USER: flowrouter
+      POSTGRES_PASSWORD: ${FLOW_ROUTER_PG_PASSWORD:?FLOW_ROUTER_PG_PASSWORD is required}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowrouter -d flowrouter"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # 只放可重建数据（缓存 / 节流 / 锁），不开持久化；内存满了按 LRU 淘汰
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
   app:
-    image: flow-router:web-perf-20261015
+    image: flow-router:${FLOW_ROUTER_TAG:?FLOW_ROUTER_TAG is required}
     pull_policy: never
     restart: unless-stopped
     command: ["-config", "/app/data/config.yaml"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       SERVER_PORT: "8418"
-      DATABASE_DRIVER: sqlite
+      DATABASE_DRIVER: postgres
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: flowrouter
+      DATABASE_PASSWORD: ${FLOW_ROUTER_PG_PASSWORD}
+      DATABASE_NAME: flowrouter
+      DATABASE_SSLMODE: disable
+      # 旧 SQLite 文件位置：migrate-db 读取它，库为空时启动日志也会据此提示
       DATABASE_PATH: /app/data/upstream-ops.db
+      REDIS_ADDR: redis:6379
       SERVER_MODE: release
       LOG_LEVEL: info
       APP_SECRET: ${APP_SECRET:?APP_SECRET is required}
@@ -33,6 +88,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+volumes:
+  pg-data:
 
 networks:
   sub2api-net:
