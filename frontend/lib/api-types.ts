@@ -570,6 +570,12 @@ export interface GatewayGroup {
    * 开启后 400/401/403/404 等 4xx 同样会重试与顺延（429 始终可顺延）。
    */
   failover_on_4xx?: boolean
+  /** 明确余额不足是否顺延；关闭优先于通用 4xx 顺延。 */
+  balance_failover_enabled?: boolean
+  /** 余额不足初始冷却（秒）；0=不新增冷却。 */
+  balance_cooldown_seconds?: number
+  /** 余额不足连续失败冷却上限（秒）。 */
+  balance_cooldown_max_seconds?: number
   /** 失败冷却秒数，0=不冷却 */
   cooldown_seconds?: number
   /**

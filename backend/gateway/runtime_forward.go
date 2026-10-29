@@ -26,6 +26,8 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 		return
 	}
 	key, group := auth.Key, auth.Group
+	c.Set("context_key_id", key.ID)
+	c.Set("context_group_id", group.ID)
 
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -43,6 +45,13 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 	}
 
 	requestedModel := ExtractModelFromBody(body)
+	audit := &failoverAudit{RequestID: reqID, GroupID: group.ID, Model: requestedModel}
+	stopReason := ""
+	defer func() {
+		if stopReason != "" {
+			rt.logFailoverDecision(audit, "stop", stopReason, 0)
+		}
+	}()
 	body, err = rt.applyServiceTierRules(group, key, kind, requestedModel, body)
 	if err != nil {
 		rt.writeGatewayError(c, kind, http.StatusForbidden, "permission_error", err.Error())
@@ -57,15 +66,81 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 
 	routes, err := rt.Routes.ListByGroupID(group.ID)
 	if err != nil || len(routes) == 0 {
+		stopReason = "no_routes_configured"
 		rt.writeGatewayError(c, kind, http.StatusServiceUnavailable, "api_error", "no routes configured")
 		return
 	}
 	routes = filterRoutesForModel(routes, rt.ParseModelsJSON(group.ModelsJSON), requestedModel)
 	if len(routes) == 0 {
-		rt.writeGatewayError(c, kind, http.StatusServiceUnavailable, "api_error", "no route is bound to this model")
+		stopReason = "no_compatible_model_route"
+		rt.writeGatewayError(c, kind, http.StatusNotFound, "model_not_found", "model is not available in this gateway group; use the API key for the matching model group")
 		return
 	}
+	contextRefs := contextReferences(body, false)
+	audit.HasContext = len(contextRefs) > 0
+	pinnedRoute, affinityErr := rt.Routes.ResolveContextRoute(key.ID, group.ID, contextRefs)
+	audit.PinnedRoute = pinnedRoute
+	if affinityErr != nil {
+		stopReason = "context_route_conflict"
+		rt.writeGatewayError(c, kind, http.StatusConflict, "context_route_conflict", "cannot safely route this upstream context; start a new conversation")
+		return
+	}
+	if pinnedRoute != 0 {
+		pinned := routes[:0]
+		for _, route := range routes {
+			if route.ID == pinnedRoute {
+				pinned = append(pinned, route)
+			}
+		}
+		routes = pinned
+		if len(routes) == 0 || !IsRouteSchedulable(&routes[0], time.Now()) {
+			stopReason = "context_route_unavailable"
+			rt.writeGatewayError(c, kind, http.StatusServiceUnavailable, "context_route_unavailable", "the original upstream for this conversation is unavailable; retry later or start a new conversation")
+			return
+		}
+	}
 
+	schedulable := make([]storage.GatewayRoute, 0, len(routes))
+	for _, route := range routes {
+		if IsRouteSchedulable(&route, time.Now()) {
+			schedulable = append(schedulable, route)
+		}
+	}
+	if len(schedulable) == 0 {
+		stopReason = "no_schedulable_route"
+		rt.writeGatewayError(c, kind, http.StatusServiceUnavailable, "no_schedulable_route", "no route is currently schedulable")
+		return
+	}
+	routes, healthOK := rt.filterCredentialCooldowns(c, schedulable, audit)
+	if !healthOK {
+		stopReason = "health_state_unavailable"
+		rt.writeGatewayError(c, kind, http.StatusServiceUnavailable, "health_state_unavailable", "credential health state is temporarily unavailable")
+		return
+	}
+	if len(routes) == 0 {
+		stopReason = "all_credentials_cooling_down"
+		if pinnedRoute != 0 {
+			stopReason = "context_bound_credential_cooling_down"
+		}
+		rt.writeGatewayError(c, kind, http.StatusServiceUnavailable, "credential_cooling_down", "the upstream credential is cooling down; retry later or start a new conversation on an available route")
+		return
+	}
+	routes, healthOK = rt.filterModelCooldowns(c, routes, requestedModel, pinnedRoute != 0)
+	if !healthOK {
+		stopReason = "health_state_unavailable"
+		rt.writeGatewayError(c, kind, http.StatusServiceUnavailable, "health_state_unavailable", "route health state is temporarily unavailable")
+		return
+	}
+	if len(routes) == 0 {
+		stopReason = "all_models_cooling_down"
+		message := "all routes for this model are cooling down; retry after the indicated delay"
+		if pinnedRoute != 0 {
+			stopReason = "context_bound_model_cooling_down"
+			message = "the original upstream for this conversation is cooling down; retry later or start a new conversation"
+		}
+		rt.writeGatewayError(c, kind, http.StatusServiceUnavailable, "model_cooling_down", message)
+		return
+	}
 	groupsByChannel := rt.loadGroupsByChannel(c.Request.Context(), routes)
 	groupMapping := ParseModelMapping(group.ModelMappingJSON)
 
@@ -75,6 +150,12 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 	failoverEnabled := group.FailoverEnabled
 	failoverMax := group.FailoverMax
 	failoverOn4xx := group.FailoverOn4xx
+	if len(contextRefs) > 0 {
+		// Even legacy contexts without a stored affinity are never retried
+		// against different credentials after an upstream has rejected them.
+		failoverEnabled = false
+		sameRouteRetries = 0
+	}
 	cooldownSec := group.CooldownSeconds
 	ftTimeoutSec := rt.clampFirstTokenTimeoutSec(group.FirstTokenTimeoutSec)
 	var firstTokenTimeout time.Duration
@@ -109,19 +190,33 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 	routesTried := 0
 
 	for {
-		candidates := SortRoutes(routes, groupsByChannel, group.RateSortDirection, time.Now(), exclude)
-		if len(candidates) == 0 {
-			break
-		}
-		// 非首条路由 = 顺延；超过顺延次数则停止
 		if routesTried > 0 {
-			if !failoverEnabled || failoversDone >= failoverMax {
+			if reason := failoverStopReason(retryEnabled, failoverEnabled, audit.HasContext, failoversDone, failoverMax); reason != "" {
+				stopReason = reason
+				break
+			}
+			var ok bool
+			routes, ok = rt.filterCredentialCooldowns(c, routes, audit)
+			if !ok {
+				stopReason = "health_state_unavailable"
 				break
 			}
 		}
-
+		candidates := SortRoutes(routes, groupsByChannel, group.RateSortDirection, time.Now(), exclude)
+		if len(candidates) == 0 {
+			stopReason = "no_eligible_backup"
+			if routesTried == 0 {
+				stopReason = "no_schedulable_route"
+			}
+			break
+		}
 		cand := candidates[0]
 		route := cand.Route
+		if routesTried > 0 {
+			rt.logFailoverDecision(audit, "failover", "eligible_backup", route.ID)
+		}
+		audit.RouteID = route.ID
+		c.Set("context_route_id", route.ID)
 		exclude[route.ID] = struct{}{}
 		if routesTried > 0 {
 			failoversDone++
@@ -152,6 +247,8 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 		maxTriesOnRoute := 1 + sameRouteRetries
 		for tryOnRoute := 0; tryOnRoute < maxTriesOnRoute; tryOnRoute++ {
 			attemptNo++
+			audit.Attempt = attemptNo
+			audit.Status = 0
 			attemptKind := attemptKindPrimary
 			if tryOnRoute > 0 {
 				attemptKind = attemptKindRetry
@@ -161,6 +258,7 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 
 			target, resolveErr := rt.resolveUpstreamTarget(&route)
 			if resolveErr != nil {
+				audit.FailureClass = "configuration"
 				lastErr = resolveErr
 				errInfo := usageErrorInfo{
 					Type:    "config",
@@ -200,6 +298,7 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 
 			fwdBody, upstreamPath, converted, toolBridge, convErr := rt.prepareUpstreamRequestWithToolBridge(body, kind, upstreamKind, upstreamModel, stream, path)
 			if convErr != nil {
+				stopReason = "request_conversion_failed"
 				rt.writeGatewayError(c, kind, http.StatusBadRequest, "invalid_request_error", "protocol convert failed: "+convErr.Error())
 				return
 			}
@@ -252,6 +351,7 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 				)
 			}
 			duration := time.Since(start).Milliseconds()
+			audit.Status = status
 
 			// 已向客户端写出 SSE：不能再重试/顺延，直接记账并结束本次请求。
 			// 客户端在 commit 后、终端帧交付前断开：记 success=true + error_type=client。
@@ -313,17 +413,32 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 				}
 				if success {
 					_ = rt.Routes.NoteSuccessForPauseError(route.ID)
-				} else if rt.Log != nil {
-					rt.Log.Warn("gateway stream ended with error after commit",
-						"request_id", reqID,
-						"attempt", attemptNo,
-						"route_id", route.ID,
-						"upstream_url", upstreamFullURL,
-						"err", errInfo.Summary,
-						"client_disconnected", clientDisconnected,
-						"input_tokens", streamTokens.InputTokens,
-						"output_tokens", streamTokens.OutputTokens,
-					)
+					if !onlyClientDisconnect {
+						_ = rt.Routes.NoteModelSuccess(route.ID, requestedModel, start)
+						_ = rt.Routes.NoteCredentialSuccess(credentialScope(target), start)
+					}
+					if onlyClientDisconnect {
+						stopReason = "client_canceled_after_commit"
+					}
+				} else {
+					stopReason = "stream_already_committed"
+					audit.FailureClass = "stream_error"
+					usageMeta.CooldownUntil = rt.coolModel(route.ID, requestedModel, errInfo.Summary, reqID, cooldownSec)
+					if rt.Log != nil {
+						rt.Log.Warn("gateway stream ended with error after commit",
+							"request_id", reqID,
+							"attempt", attemptNo,
+							"route_id", route.ID,
+							"model", requestedModel,
+							"stream_committed", true,
+							"cooldown_until", usageMeta.CooldownUntil,
+							"upstream_url", upstreamFullURL,
+							"err", errInfo.Summary,
+							"client_disconnected", clientDisconnected,
+							"input_tokens", streamTokens.InputTokens,
+							"output_tokens", streamTokens.OutputTokens,
+						)
+					}
 				}
 				// status 通常为 200；保留已 drain 的 tokens（含客户端断开后的用量同步）。
 				if status == 0 {
@@ -333,7 +448,12 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 				return
 			}
 
-			if fwdErr != nil || rt.isFailoverStatus(status, failoverOn4xx) {
+			balanceExhausted := isBalanceExhausted(status, respBody)
+			if fwdErr != nil || balanceExhausted || rt.isFailoverStatus(status, failoverOn4xx) {
+				audit.FailureClass = "upstream_error"
+				if balanceExhausted {
+					audit.FailureClass = "balance_exhausted"
+				}
 				gwCfg := rt.gatewayRuntime()
 				errInfo := rt.buildUpstreamErrorInfoCfg(gwCfg, fwdErr, status, respHeaders, respBody, upstreamFullURL, c.Request.Method)
 				if rt.isFirstTokenTimeout(fwdErr) {
@@ -369,9 +489,20 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 					lastErr = fmt.Errorf("upstream status %d: %s", status, errInfo.Summary)
 				}
 				// 最后一次同路由尝试失败才进入冷却（客户端取消 / 重试关闭时不写冷却）
-				lastTryOnRoute := tryOnRoute >= maxTriesOnRoute-1
+				lastTryOnRoute := balanceExhausted || tryOnRoute >= maxTriesOnRoute-1
 				var cooldownUntil *time.Time
-				if retryEnabled && lastTryOnRoute && cooldownSec > 0 && !clientCanceled {
+				if balanceExhausted && !clientCanceled {
+					cooldownUntil = rt.coolCredential(target, route.ID, reqID, group)
+					// Billing failures must not retry the same credential, even when
+					// same-route retries are enabled or persistence is unavailable.
+					for _, other := range routes {
+						if t, e := rt.resolveUpstreamTarget(&other); e == nil && credentialScope(t) == credentialScope(target) {
+							exclude[other.ID] = struct{}{}
+						}
+					}
+				} else if lastTryOnRoute && cooldownSec > 0 && !clientCanceled && requestedModel != "" {
+					cooldownUntil = rt.coolModel(route.ID, requestedModel, errInfo.Summary, reqID, cooldownSec)
+				} else if retryEnabled && lastTryOnRoute && cooldownSec > 0 && !clientCanceled {
 					until := time.Now().Add(time.Duration(cooldownSec) * time.Second)
 					cooldownUntil = &until
 					pauseReason := errInfo.Summary
@@ -396,13 +527,21 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 				}
 				// 客户端已取消：立刻结束，避免用已取消 context 继续打上游
 				if clientCanceled {
+					stopReason = "client_canceled"
+					goto finishError
+				}
+				// Explicit billing policy overrides generic 4xx/429/5xx retry rules.
+				if balanceExhausted && !group.BalanceFailoverEnabled {
+					stopReason = "balance_failover_disabled"
 					goto finishError
 				}
 				// 重试关闭，或还可同路由重试则 continue；否则跳出到顺延
 				if !retryEnabled {
+					stopReason = "retry_disabled"
 					goto finishError
 				}
-				if tryOnRoute < maxTriesOnRoute-1 {
+				if !balanceExhausted && tryOnRoute < maxTriesOnRoute-1 {
+					rt.logFailoverDecision(audit, "retry", "same_route_retry", route.ID)
 					continue
 				}
 				break // 同路由耗尽，顺延
@@ -410,6 +549,8 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 
 			// 默认 4xx（非 429）不重试不顺延，直接回显；组开启 failover_on_4xx 时已在上方 isFailoverStatus 分支处理。
 			if status >= 400 {
+				stopReason = "non_retryable_http_status"
+				audit.FailureClass = "http_error"
 				errInfo := rt.buildUpstreamErrorInfoCfg(rt.gatewayRuntime(), nil, status, respHeaders, respBody, upstreamFullURL, c.Request.Method)
 				clientBody := rt.convertErrorBody(respBody, kind, upstreamKind, converted)
 				clientBody = rt.injectUpstreamOpsRequestID(clientBody, reqID)
@@ -436,15 +577,19 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 				c.Header("Content-Type", "application/json")
 			}
 			c.Status(status)
+			rt.captureContext(c, clientBody)
 			_, _ = c.Writer.Write(clientBody)
 			// 成功：立刻恢复调度；连续成功达到阈值后自动清除错误残留展示
 			_ = rt.Routes.NoteSuccessForPauseError(route.ID)
+			_ = rt.Routes.NoteModelSuccess(route.ID, requestedModel, start)
+			_ = rt.Routes.NoteCredentialSuccess(credentialScope(target), start)
 			rt.recordUsage(key, group, &route, target, reqID, requestedModel, upstreamModel, chain, tokens, cand.EffectiveRate, cand.BillingRate, stream, status, true, usageErrorInfo{}, duration, firstTokenMS, c, usageMeta)
 			return
 		}
 
 		// 同路由结束：判断能否顺延
 		if !retryEnabled || !failoverEnabled || failoversDone >= failoverMax {
+			stopReason = failoverStopReason(retryEnabled, failoverEnabled, audit.HasContext, failoversDone, failoverMax)
 			break
 		}
 	}

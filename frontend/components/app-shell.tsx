@@ -1,6 +1,9 @@
 "use client"
 
-import { Outlet } from "react-router-dom"
+import { Suspense } from "react"
+import { Outlet, useLocation } from "react-router-dom"
+import { AddChannelProvider } from "@/lib/add-channel-context"
+import { LoadBoundary, LoadingPanel } from "@/components/load-boundary"
 import { MonitorHeader } from "@/components/monitor/monitor-header"
 import { DockBar } from "@/components/monitor/dock-bar"
 
@@ -13,7 +16,9 @@ import { DockBar } from "@/components/monitor/dock-bar"
 const SHOW_DOCK = false
 
 export function AppShell() {
+  const location = useLocation()
   return (
+    <AddChannelProvider>
     <div className="min-h-screen bg-background">
       <MonitorHeader />
       <main
@@ -23,9 +28,12 @@ export function AppShell() {
             : "mx-auto max-w-[120rem] space-y-4 px-3 py-3 sm:space-y-5 sm:px-6 sm:py-5 lg:px-8"
         }
       >
-        <Outlet />
+        <LoadBoundary key={location.pathname}>
+          <Suspense fallback={<LoadingPanel />}><Outlet /></Suspense>
+        </LoadBoundary>
       </main>
       {SHOW_DOCK ? <DockBar /> : null}
     </div>
+    </AddChannelProvider>
   )
 }

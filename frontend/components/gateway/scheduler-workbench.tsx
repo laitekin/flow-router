@@ -133,7 +133,10 @@ export function SchedulerWorkbench({
     group?.failover_enabled === false
       ? "不顺延"
       : `最多顺延 ${group?.failover_max ?? 0} 次`,
-    group?.failover_on_4xx ? "4xx 可顺延" : "4xx 默认直返",
+    group?.failover_on_4xx ? "普通 4xx 可顺延" : "普通 4xx 直返",
+    group?.balance_failover_enabled === false ? "余额不足不顺延" : "余额不足按策略顺延",
+    (group?.balance_cooldown_seconds ?? 300) === 0 ? "余额不足不新增冷却"
+      : `余额冷却 ${group?.balance_cooldown_seconds ?? 300}–${group?.balance_cooldown_max_seconds ?? 1800}s`,
     `冷却 ${group?.cooldown_seconds ?? 0}s`,
   ]
 

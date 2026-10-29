@@ -32,6 +32,9 @@ export type GroupFormState = {
   failover_max: string
   /** 4xx 状态码也走重试/顺延（默认关） */
   failover_on_4xx: boolean
+  balance_failover_enabled: boolean
+  balance_cooldown_seconds: string
+  balance_cooldown_max_seconds: string
   cooldown_seconds: string
   first_token_timeout_sec: string
   /** 组级统一 User-Agent；路由选「组」时使用 */
@@ -579,6 +582,9 @@ export const emptyGroupForm = (): GroupFormState => ({
   failover_enabled: true,
   failover_max: "8",
   failover_on_4xx: false,
+  balance_failover_enabled: true,
+  balance_cooldown_seconds: "300",
+  balance_cooldown_max_seconds: "1800",
   cooldown_seconds: "30",
   first_token_timeout_sec: "0",
   user_agent: "",

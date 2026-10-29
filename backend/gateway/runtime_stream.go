@@ -384,14 +384,18 @@ func (rt *Runtime) forwardStreamIncrementalWithToolBridge(
 	events := make(chan scanEvent, 32)
 	done := make(chan struct{})
 	var lastReadAt int64
+	var bytesRead int64
+	lastEventName := "none"
 	atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
+	diagnostic := func(label string, cause error) error {
+		return streamReadDiagnostic(label, cause, resp.Proto, start, atomic.LoadInt64(&lastReadAt), atomic.LoadInt64(&bytesRead), lastEventName)
+	}
 
 	go func() {
 		defer close(events)
-		scanner := bufio.NewScanner(resp.Body)
+		scanner := bufio.NewScanner(&streamProgressReader{reader: resp.Body, lastReadAt: &lastReadAt, bytesRead: &bytesRead})
 		scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 		for scanner.Scan() {
-			atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
 			line := strings.TrimRight(scanner.Text(), "\r")
 			select {
 			case events <- scanEvent{line: line}:
@@ -602,7 +606,7 @@ func (rt *Runtime) forwardStreamIncrementalWithToolBridge(
 				msg = err.Error()
 			}
 			sendTerminalError("stream_timeout", msg)
-			result.StreamErr = errors.New(msg)
+			result.StreamErr = diagnostic(msg, upCtx.Err())
 			return result
 
 		case <-clientDone:
@@ -663,11 +667,11 @@ func (rt *Runtime) forwardStreamIncrementalWithToolBridge(
 			msg := fmt.Sprintf("upstream stream idle for %s", idleTimeout)
 			if result.Committed {
 				sendTerminalError("stream_timeout", msg)
-				result.StreamErr = errors.New(msg)
+				result.StreamErr = diagnostic(msg, context.DeadlineExceeded)
 				result.Tokens = rt.finalizeStreamTokens(tokens, usageBuf.Bytes(), upKind)
 				return result
 			}
-			result.Err = errors.New(msg)
+			result.Err = diagnostic(msg, context.DeadlineExceeded)
 			return result
 
 		case ev, ok := <-events:
@@ -684,13 +688,13 @@ func (rt *Runtime) forwardStreamIncrementalWithToolBridge(
 				if !result.DownstreamComplete {
 					msg := "upstream stream closed before terminal event"
 					if !result.Committed {
-						result.Err = errors.New(msg)
+						result.Err = diagnostic(msg, io.EOF)
 						return result
 					}
 					if !result.ClientDisconnected {
 						sendTerminalError("stream_incomplete", msg)
 					}
-					result.StreamErr = errors.New(msg)
+					result.StreamErr = diagnostic(msg, io.EOF)
 					rt.finalizeStreamClientDisconnect(&result)
 					return result
 				}
@@ -726,9 +730,9 @@ func (rt *Runtime) forwardStreamIncrementalWithToolBridge(
 			if ev.err != nil {
 				if !result.Committed {
 					if errors.Is(ev.err, bufio.ErrTooLong) {
-						result.Err = fmt.Errorf("upstream SSE line exceeded %d bytes", maxLineSize)
+						result.Err = diagnostic(fmt.Sprintf("upstream SSE line exceeded %d bytes", maxLineSize), ev.err)
 					} else {
-						result.Err = ev.err
+						result.Err = diagnostic("upstream stream read failed before commit", ev.err)
 					}
 					return result
 				}
@@ -743,7 +747,7 @@ func (rt *Runtime) forwardStreamIncrementalWithToolBridge(
 					msg = fmt.Sprintf("upstream SSE line exceeded %d bytes", maxLineSize)
 				}
 				sendTerminalError("stream_read_error", msg)
-				result.StreamErr = ev.err
+				result.StreamErr = diagnostic(msg, ev.err)
 				return result
 			}
 
@@ -765,6 +769,18 @@ func (rt *Runtime) forwardStreamIncrementalWithToolBridge(
 					}
 				}
 				eventName, eventData := rt.parseSSEEventLines(pendingLines)
+				lastEventName = eventName
+				if lastEventName == "" {
+					var eventType struct {
+						Type string `json:"type"`
+					}
+					if json.Unmarshal([]byte(eventData), &eventType) == nil {
+						lastEventName = eventType.Type
+					}
+				}
+				if eventName == "response.created" || eventName == "response.output_item.done" || eventName == "response.completed" || strings.Contains(eventData, `"encrypted_content"`) {
+					rt.captureContext(c, []byte(eventData))
+				}
 				terminal, success, terminalMessage := rt.upstreamSSETerminal(eventName, eventData, upKind)
 				if err := processEvent(pendingLines); err != nil && !result.ClientDisconnected {
 					// write error already flagged disconnect
@@ -782,7 +798,7 @@ func (rt *Runtime) forwardStreamIncrementalWithToolBridge(
 						if !result.ClientDisconnected && !result.DownstreamComplete {
 							sendTerminalError("upstream_error", terminalMessage)
 						}
-						result.StreamErr = errors.New(terminalMessage)
+						result.StreamErr = diagnostic("upstream terminal error", errors.New(terminalMessage))
 					}
 					rt.finalizeStreamClientDisconnect(&result)
 					return result
