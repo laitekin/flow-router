@@ -303,9 +303,9 @@ Flow Router 主要解决这些痛点：
 
 ## 快速启动
 
-### Docker Compose（SQLite）
+### Docker Compose（PostgreSQL + Redis）
 
-默认使用 SQLite 单文件数据库，推荐直接用 Docker Compose：
+默认部署包含 PostgreSQL（持久化数据）、Redis（缓存 / 节流 / 任务锁）和应用三个服务。设计说明与迁移步骤见 [docs/postgres-redis.md](docs/postgres-redis.md)。
 
 ```bash
 cp .env.example .env
@@ -315,6 +315,7 @@ cp .env.example .env
 
 ```env
 APP_SECRET=请替换为 32 字节以上随机字符串
+POSTGRES_PASSWORD=请替换为数据库密码
 ```
 
 `APP_SECRET` 用于 AES-GCM 加密敏感字段，包括上游密码、Token、Cookie、通知渠道密钥、验证码平台 API Key 等。修改后既有加密数据将无法解密，请务必妥善保存。
@@ -341,13 +342,30 @@ docker compose up -d
 http://localhost:8080
 ```
 
-默认数据文件在容器内：
+业务数据存放在 PostgreSQL 的 `pg-data` 卷里；系统设置配置文件仍持久化到宿主机 `data/config.yaml`。Redis 只放可重建的数据，不开持久化。
 
-```text
-/app/data/upstream-ops.db
+### 从旧版 SQLite 升级
+
+旧数据在 `data/upstream-ops.db`。升级后用自带的 `migrate-db` 命令整库导入 PostgreSQL：
+
+```bash
+docker compose down
+docker compose up -d postgres redis
+docker compose run --rm app migrate-db -config /app/data/config.yaml -from-path /app/data/upstream-ops.db
+docker compose up -d
 ```
 
-宿主机对应文件是项目根目录下的 `data/upstream-ops.db`。系统设置配置文件会持久化到 `data/config.yaml`。
+旧文件只读不改，随时可以用 `docker-compose.sqlite.yml` 回退。完整说明见 [docs/postgres-redis.md](docs/postgres-redis.md)。
+
+### Docker Compose（SQLite 单文件）
+
+不想运行 PostgreSQL / Redis 时：
+
+```bash
+docker compose -f docker-compose.sqlite.yml up -d
+```
+
+数据文件在宿主机 `data/upstream-ops.db`。
 
 ### 固定镜像版本
 
@@ -365,10 +383,10 @@ IMAGE_TAG=v0.0.9
 
 ## MySQL 部署
 
-如果不想使用 SQLite，可以叠加 MySQL 配置：
+叠加在 SQLite 版 compose 之上：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.mysql.yml up -d
+docker compose -f docker-compose.sqlite.yml -f docker-compose.mysql.yml up -d
 ```
 
 `.env` 至少设置：
@@ -399,6 +417,26 @@ LOG_LEVEL=info
 - `LOG_LEVEL`：日志等级。
 
 ### 数据库配置
+
+PostgreSQL（默认 compose 已配好）：
+
+```env
+DATABASE_DRIVER=postgres
+DATABASE_HOST=postgres
+DATABASE_PORT=5432
+DATABASE_USER=upstreamops
+DATABASE_PASSWORD=change-me
+DATABASE_NAME=upstreamops
+DATABASE_SSLMODE=disable
+# 或者一行：DATABASE_URL=postgres://user:pass@host:5432/db?sslmode=require
+```
+
+Redis（可选；不配置时用进程内内存）：
+
+```env
+REDIS_URL=redis://:password@redis:6379/0
+# 或 REDIS_ADDR / REDIS_PASSWORD / REDIS_DB；REDIS_KEY_PREFIX 默认 flowrouter:
+```
 
 SQLite：
 

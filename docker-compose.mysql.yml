@@ -1,3 +1,7 @@
+# MySQL 部署：叠加在 SQLite 版 compose 之上
+#
+#   docker compose -f docker-compose.sqlite.yml -f docker-compose.mysql.yml up -d
+#
 services:
   mysql:
     image: mysql:8.4

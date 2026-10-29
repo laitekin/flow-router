@@ -96,6 +96,7 @@ func main() {
 		log.Error("auto migrate failed", "err", err)
 		os.Exit(1)
 	}
+	warnIfLegacySQLiteLeftBehind(log, cfg.Database, db)
 
 	// 可选 Redis：缓存 / 节流 / 任务锁。未配置或连不上时回落进程内内存，不影响启动。
 	kvStore := kv.Open(context.Background(), cfg.Redis.ToKV(), log)

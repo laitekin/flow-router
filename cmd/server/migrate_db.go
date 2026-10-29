@@ -3,11 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/bejix/upstream-ops/backend/config"
 	"github.com/bejix/upstream-ops/backend/storage"
+	"gorm.io/gorm"
 )
 
 // runMigrateDB 子命令：把旧库（默认 SQLite）的数据整库复制到当前配置的数据库（通常是 PostgreSQL）。
@@ -81,4 +84,29 @@ func runMigrateDB(args []string) int {
 	}
 	fmt.Printf("done: %d rows in %d tables, %s\n", total, len(results), time.Since(start).Round(time.Millisecond))
 	return 0
+}
+
+// warnIfLegacySQLiteLeftBehind 换到 PostgreSQL / MySQL 后库是空的、但旧的 SQLite 文件还在：
+// 多半是升级后忘了迁移数据，启动时大声提示怎么迁，避免用户以为数据丢了。
+func warnIfLegacySQLiteLeftBehind(log *slog.Logger, dbCfg config.DatabaseConfig, db *gorm.DB) {
+	driver := strings.ToLower(strings.TrimSpace(dbCfg.Driver))
+	if driver == "" || driver == "sqlite" || driver == "sqlite3" {
+		return
+	}
+	legacy := strings.TrimSpace(dbCfg.Path)
+	if legacy == "" {
+		legacy = "./data/upstream-ops.db"
+	}
+	info, err := os.Stat(legacy)
+	if err != nil || info.Size() == 0 {
+		return
+	}
+	var channels, groups int64
+	db.Model(&storage.Channel{}).Count(&channels)
+	db.Model(&storage.GatewayGroup{}).Count(&groups)
+	if channels > 0 || groups > 0 {
+		return
+	}
+	log.Warn("database is empty but a legacy SQLite file exists; migrate your data with: upstream-ops migrate-db -from-path "+legacy,
+		"driver", driver, "sqlite", legacy)
 }
