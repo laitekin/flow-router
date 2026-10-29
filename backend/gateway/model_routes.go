@@ -96,10 +96,12 @@ func filterRoutesForModel(routes []storage.GatewayRoute, items []ModelListItem, 
 	model = strings.TrimSpace(model)
 	allowed := make(map[uint]struct{})
 	explicit := false
+	found := false
 	for _, item := range items {
 		if strings.TrimSpace(item.ID) != model {
 			continue
 		}
+		found = true
 		for _, source := range item.Sources {
 			if source.RouteID == 0 {
 				continue
@@ -108,6 +110,12 @@ func filterRoutesForModel(routes []storage.GatewayRoute, items []ModelListItem, 
 			allowed[source.RouteID] = struct{}{}
 		}
 		break
+	}
+	// A populated group catalog is an allowlist. Never send an unknown
+	// model to every upstream (e.g. DeepSeek through a GPT-only credential).
+	// Requests without a model, such as polling image jobs, remain routable.
+	if model != "" && len(items) > 0 && !found {
+		return nil
 	}
 	if !explicit {
 		return append([]storage.GatewayRoute(nil), routes...)

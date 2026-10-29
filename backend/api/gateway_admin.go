@@ -40,6 +40,22 @@ func registerGatewayAdmin(g *gin.RouterGroup, d *Deps) {
 
 		// models
 		gp.GET("/models/catalog", func(c *gin.Context) { listGatewayModelCatalog(c, d) })
+		gp.GET("/model-cooldowns", func(c *gin.Context) {
+			items, err := d.Gateway.Routes.ActiveModelCooldowns(time.Now())
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read model cooldowns"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"items": items})
+		})
+		gp.GET("/credential-cooldowns", func(c *gin.Context) {
+			items, err := d.Gateway.Routes.ActiveCredentialCooldowns(time.Now())
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read credential cooldowns"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"items": items})
+		})
 		gp.GET("/groups/:id/models/preview", func(c *gin.Context) { previewGatewayGroupModels(c, d) })
 		gp.POST("/groups/:id/models/sync", func(c *gin.Context) { syncGatewayGroupModels(c, d) })
 		gp.POST("/groups/:id/models/catalog-sync", func(c *gin.Context) { syncGatewayCatalogModels(c, d) })

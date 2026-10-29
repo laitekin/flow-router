@@ -2,12 +2,15 @@
 
 import { Activity } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { BalanceOverview } from "@/components/monitor/balance-overview"
+import { lazy, Suspense } from "react"
+import { LoadBoundary, LoadingPanel } from "@/components/load-boundary"
 import { MultiplierChanges } from "@/components/monitor/multiplier-changes"
 import { useDashboardSummary, useGatewayUsageStatsToday, useRateChanges } from "@/lib/queries"
 import { formatTokens, money } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
+
+const BalanceOverview = lazy(() => import("@/components/monitor/balance-overview").then((m) => ({ default: m.BalanceOverview })))
 
 /**
  * OverviewPanel 把原来独立的三块（KpiRow 六张大卡 + 余额概览 + 最近倍率变动）
@@ -103,7 +106,7 @@ export function OverviewPanel() {
               <span className="text-[10px] text-muted-foreground">{"最近 7 天"}</span>
             </div>
             <div className="h-52">
-              <BalanceOverview bare />
+              <LoadBoundary><Suspense fallback={<LoadingPanel label="余额趋势加载中…" />}><BalanceOverview bare /></Suspense></LoadBoundary>
             </div>
           </section>
 

@@ -224,19 +224,19 @@ func (NotificationChannel) TableName() string { return "notification_channels" }
 type NotificationEvent string
 
 const (
-	EventBalanceLow                     NotificationEvent = "balance_low"
-	EventRateChanged                    NotificationEvent = "rate_changed"
-	EventRateStructureChanged           NotificationEvent = "rate_structure_changed"
-	EventRateAdded                      NotificationEvent = "rate_added"
-	EventRateRemoved                    NotificationEvent = "rate_removed"
-	EventAnnouncement                   NotificationEvent = "announcement"
-	EventLoginFailed                    NotificationEvent = "login_failed"
-	EventCaptchaFailed                  NotificationEvent = "captcha_failed"
-	EventMonitorFailed                  NotificationEvent = "monitor_failed"
-	EventSubscriptionDailyLow           NotificationEvent = "subscription_daily_remaining_low"
-	EventSubscriptionWeeklyLow          NotificationEvent = "subscription_weekly_remaining_low"
-	EventSubscriptionMonthlyLow         NotificationEvent = "subscription_monthly_remaining_low"
-	EventSubscriptionExpiring           NotificationEvent = "subscription_expiring"
+	EventBalanceLow             NotificationEvent = "balance_low"
+	EventRateChanged            NotificationEvent = "rate_changed"
+	EventRateStructureChanged   NotificationEvent = "rate_structure_changed"
+	EventRateAdded              NotificationEvent = "rate_added"
+	EventRateRemoved            NotificationEvent = "rate_removed"
+	EventAnnouncement           NotificationEvent = "announcement"
+	EventLoginFailed            NotificationEvent = "login_failed"
+	EventCaptchaFailed          NotificationEvent = "captcha_failed"
+	EventMonitorFailed          NotificationEvent = "monitor_failed"
+	EventSubscriptionDailyLow   NotificationEvent = "subscription_daily_remaining_low"
+	EventSubscriptionWeeklyLow  NotificationEvent = "subscription_weekly_remaining_low"
+	EventSubscriptionMonthlyLow NotificationEvent = "subscription_monthly_remaining_low"
+	EventSubscriptionExpiring   NotificationEvent = "subscription_expiring"
 )
 
 // NotificationLog 通知发送记录。
@@ -396,6 +396,11 @@ type GatewayGroup struct {
 	// FailoverOn4xx：是否将上游 4xx（含 400/401/403/404 等；429 始终可顺延）纳入重试/顺延。
 	// 默认 false：仅网络错误、429、5xx 会重试/顺延；其它 4xx 直接回显。
 	FailoverOn4xx bool `gorm:"not null;default:false" json:"failover_on_4xx"`
+	// Billing exhaustion has an explicit switch independent of generic 4xx handling.
+	BalanceFailoverEnabled bool `gorm:"not null;default:true" json:"balance_failover_enabled"`
+	// 0 disables NEW credential cooldowns; existing shared cooldowns remain intact.
+	BalanceCooldownSeconds    int `gorm:"not null;default:300" json:"balance_cooldown_seconds"`
+	BalanceCooldownMaxSeconds int `gorm:"not null;default:1800" json:"balance_cooldown_max_seconds"`
 	// 失败后临时冷却秒数（0=不冷却）；恢复后可再参与调度
 	CooldownSeconds int `gorm:"not null;default:30" json:"cooldown_seconds"`
 	// 首字/首字节超时（秒）：0=关闭；>0 时等待首字节超过该时间则主动断开并走重试/顺延。

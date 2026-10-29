@@ -1,0 +1,40 @@
+name: flow-router
+
+services:
+  app:
+    image: flow-router:web-perf-20261015
+    pull_policy: never
+    restart: unless-stopped
+    command: ["-config", "/app/data/config.yaml"]
+    environment:
+      TZ: Asia/Shanghai
+      SERVER_PORT: "8418"
+      DATABASE_DRIVER: sqlite
+      DATABASE_PATH: /app/data/upstream-ops.db
+      SERVER_MODE: release
+      LOG_LEVEL: info
+      APP_SECRET: ${APP_SECRET:?APP_SECRET is required}
+      AUTH_ENABLED: "true"
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:?AUTH_TOKEN_SECRET is required}
+    ports:
+      - "127.0.0.1:8418:8418"
+    volumes:
+      - ${FLOW_ROUTER_DATA_DIR:?FLOW_ROUTER_DATA_DIR is required}:/app/data
+    networks:
+      - default
+      - sub2api-net
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8418/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  sub2api-net:
+    external: true
+    name: sub2api_sub2api-network

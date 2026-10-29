@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Activity } from "lucide-react"
-import * as echarts from "echarts"
+import * as echarts from "echarts/core"
+import { SankeyChart } from "echarts/charts"
+import { TooltipComponent } from "echarts/components"
+import { LabelLayout } from "echarts/features"
+import { CanvasRenderer } from "echarts/renderers"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useGatewayDispatchFlow } from "@/lib/queries"
 import { useRefreshTick } from "@/lib/refresh-context"
@@ -23,6 +27,8 @@ import {
   routeColorIndex,
 } from "@/components/monitor/dispatch-health-utils"
 import { cn } from "@/lib/utils"
+
+echarts.use([SankeyChart, TooltipComponent, LabelLayout, CanvasRenderer])
 
 /**
  * 调度情况面板 = 一张请求流向桑基图。

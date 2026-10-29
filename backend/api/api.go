@@ -138,7 +138,7 @@ func registerFrontend(r *gin.Engine, dist fs.FS) {
 
 		// 永远不让 SPA fallback 覆盖 API / 健康检查 / 公开转发路径。
 		// /gateway 是前端管理页，必须允许 SPA fallback。
-		if strings.HasPrefix(path, "/api/") || path == "/healthz" ||
+		if strings.HasPrefix(path, "/api/") || path == "/api" || path == "/healthz" ||
 			strings.HasPrefix(path, "/v1/") || path == "/v1" {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
@@ -150,6 +150,13 @@ func registerFrontend(r *gin.Engine, dist fs.FS) {
 			clean = "index.html"
 		}
 		if _, err := fs.Stat(dist, clean); err != nil {
+			// Missing versioned chunks must be real 404s, never a cacheable SPA
+			// document under a .js URL (including stale tabs after deployment).
+			if path == "/assets" || strings.HasPrefix(path, "/assets/") {
+				c.Header("Cache-Control", "no-store")
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
 			c.Request.URL.Path = "/"
 		}
 		fileServer.ServeHTTP(c.Writer, c.Request)
