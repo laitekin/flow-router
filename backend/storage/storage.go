@@ -180,9 +180,15 @@ func ensureGatewayUsageIndexes(db *gorm.DB) error {
 // 一倍时才跑。失败不影响启动。
 func analyzeGatewayUsageIfStale(db *gorm.DB) {
 	var stat string
-	_ = db.Raw(
-		"SELECT stat FROM sqlite_stat1 WHERE idx = ?", "idx_gateway_usage_logs_created_unix",
-	).Scan(&stat).Error
+	// 从未 ANALYZE 过时 sqlite_stat1 不存在，直接查会报错刷日志
+	var hasStatTable int64
+	_ = db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1'").
+		Scan(&hasStatTable).Error
+	if hasStatTable > 0 {
+		_ = db.Raw(
+			"SELECT stat FROM sqlite_stat1 WHERE idx = ?", "idx_gateway_usage_logs_created_unix",
+		).Scan(&stat).Error
+	}
 	var analyzed int64
 	if fields := strings.Fields(stat); len(fields) > 0 {
 		analyzed, _ = strconv.ParseInt(fields[0], 10, 64)
