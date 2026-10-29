@@ -859,7 +859,13 @@ export function ChannelCards() {
               const status = statusOf(c)
               const meta = statusMap[status]
               return (
-                <Card key={c.id} className="flex flex-col gap-0 border border-border p-3 shadow-none sm:p-4">
+                <Card
+                  key={c.id}
+                  className={cn(
+                    "flex flex-col gap-0 border border-border p-3 shadow-none transition-shadow hover:shadow-sm sm:p-4",
+                    !c.monitor_enabled && "opacity-75",
+                  )}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="truncate text-sm font-semibold text-foreground">{c.name}</span>
@@ -953,11 +959,14 @@ export function ChannelCards() {
 
                   <InlineRates channel={c} />
 
-                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <SyncProgressStrip state={syncState[c.id] ?? emptySyncState()} />
+
+                  {/* 操作：高频的同步 / 密钥 / 编辑常驻，其余收进「更多」（原来 6 个等权按钮 + 底栏，视觉很重） */}
+                  <div className="mt-3 flex items-center gap-1 border-t border-border pt-2.5">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="gap-1 text-xs"
+                      className="h-7 gap-1 px-2.5 text-xs"
                       disabled={!!syncState[c.id]?.running || anySyncRunning}
                       onClick={() => startStream(c, "sync")}
                     >
@@ -967,46 +976,18 @@ export function ChannelCards() {
                       {"同步"}
                     </Button>
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
-                      className="gap-1 text-xs"
-                      disabled={!!syncState[c.id]?.running || anySyncRunning}
-                      onClick={() => startStream(c, "test-login")}
-                      >
-                        <LogIn className="size-3" />
-                        {"测试登录"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1 text-xs"
-                      onClick={() => setRecharging(c)}
-                    >
-                      <CreditCard className="size-3" />
-                      {"充值"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1 text-xs"
-                      onClick={() => setRedeeming(c)}
-                    >
-                      <Gift className="size-3" />
-                      {"兑换"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1 text-xs"
+                      className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
                       onClick={() => setAPIKeyDialog({ channel: c })}
                     >
                       <KeyRound className="size-3" />
                       {"密钥"}
                     </Button>
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
-                      className="gap-1 text-xs"
+                      className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
                       onClick={() => {
                         setEditing(c)
                         setCreating(true)
@@ -1015,44 +996,49 @@ export function ChannelCards() {
                       <Pencil className="size-3" />
                       {"编辑"}
                     </Button>
-                  </div>
-
-                  <SyncProgressStrip state={syncState[c.id] ?? emptySyncState()} />
-
-                  <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-2.5">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="gap-1 text-xs text-muted-foreground"
-                      disabled={busyAction === `toggle-${c.id}`}
-                      onClick={() =>
-                        withBusy(`toggle-${c.id}`, () =>
-                          apiFetch(`/channels/${c.id}/${c.monitor_enabled ? "disable" : "enable"}`, {
-                            method: "POST",
-                          }),
-                        )
-                      }
-                    >
-                      {c.monitor_enabled ? (
-                        <Pause className="size-3" />
-                      ) : (
-                        <Play className="size-3" />
-                      )}
-                      {c.monitor_enabled ? "暂停监控" : "恢复监控"}
-                    </Button>
+                    <div className="flex-1" />
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="gap-1 text-xs text-muted-foreground"
+                          className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
                           disabled={busyAction === `clear-login-${c.id}` || busyAction === `delete-${c.id}`}
                         >
-                          <MoreHorizontal className="size-3" />
+                          <MoreHorizontal className="size-3.5" />
                           {"更多"}
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem
+                          disabled={!!syncState[c.id]?.running || anySyncRunning}
+                          onSelect={() => startStream(c, "test-login")}
+                        >
+                          <LogIn className="size-3.5" />
+                          {"测试登录"}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setRecharging(c)}>
+                          <CreditCard className="size-3.5" />
+                          {"充值"}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setRedeeming(c)}>
+                          <Gift className="size-3.5" />
+                          {"兑换"}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={busyAction === `toggle-${c.id}`}
+                          onSelect={() =>
+                            withBusy(`toggle-${c.id}`, () =>
+                              apiFetch(`/channels/${c.id}/${c.monitor_enabled ? "disable" : "enable"}`, {
+                                method: "POST",
+                              }),
+                            )
+                          }
+                        >
+                          {c.monitor_enabled ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+                          {c.monitor_enabled ? "暂停监控" : "恢复监控"}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           disabled={busyAction === `clear-login-${c.id}`}
                           onSelect={async (e) => {

@@ -37,8 +37,11 @@ import type {
   GatewayProvider,
   GatewayProviderPage,
   GatewayUpstreamProtocol,
+  GatewayUsageStat,
 } from "@/lib/api-types"
 import { cn } from "@/lib/utils"
+import { formatDurationMS, relativeTime } from "@/lib/format"
+import { StatLine, SUMMARY_WINDOW_LABEL } from "./usage-stat"
 
 type ProviderForm = {
   name: string
@@ -64,7 +67,12 @@ const emptyForm = (): ProviderForm => ({
   notes: "",
 })
 
-export function GatewayProvidersPanel() {
+export function GatewayProvidersPanel({
+  stats,
+}: {
+  /** 各直连渠道 24h 用量（按尝试计，key 为直连渠道 id） */
+  stats?: Record<string, GatewayUsageStat>
+} = {}) {
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [page, setPage] = useState<GatewayProviderPage | null>(null)
   const [loading, setLoading] = useState(false)
@@ -269,6 +277,7 @@ export function GatewayProvidersPanel() {
                   <TableHead>协议</TableHead>
                   <TableHead>默认倍率</TableHead>
                   <TableHead>Key</TableHead>
+                  <TableHead title="按尝试计：每次重试 / 顺延都算一次">{SUMMARY_WINDOW_LABEL} 尝试</TableHead>
                   <TableHead>代理</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead className="text-right">操作</TableHead>
@@ -277,13 +286,13 @@ export function GatewayProvidersPanel() {
               <TableBody>
                 {loading && items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
                       <Loader2 className="mx-auto size-4 animate-spin" />
                     </TableCell>
                   </TableRow>
                 ) : items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
                       暂无直连渠道，点击右上角「新建」添加
                     </TableCell>
                   </TableRow>
@@ -309,6 +318,19 @@ export function GatewayProvidersPanel() {
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
                         {p.api_key_hint || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <StatLine stat={stats?.[String(p.id)]} />
+                          {stats?.[String(p.id)] ? (
+                            <div className="text-[11px] tabular-nums text-muted-foreground">
+                              {stats[String(p.id)].avg_first_token_ms != null
+                                ? `首字 ${formatDurationMS(stats[String(p.id)].avg_first_token_ms)} · `
+                                : ""}
+                              最近 {relativeTime(stats[String(p.id)].last_at)}
+                            </div>
+                          ) : null}
+                        </div>
                       </TableCell>
                       <TableCell>
                         {p.proxy_enabled ? (

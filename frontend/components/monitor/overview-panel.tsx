@@ -23,9 +23,9 @@ function countTodayChanges(changes: { changed_at: string }[]) {
 
 function Tile({ label, value, hint, tone }: { label: string; value: ReactNode; hint: ReactNode; tone?: string }) {
   return (
-    <div className="min-w-0 rounded-md border border-border/70 bg-muted/20 px-2 py-1.5">
-      <div className="truncate text-[10px] text-muted-foreground">{label}</div>
-      <div className={cn("truncate text-base font-semibold tabular-nums leading-tight", tone)}>{value}</div>
+    <div className="flex min-w-0 flex-col justify-between rounded-md border border-border/70 bg-muted/30 px-2.5 py-1.5">
+      <div className="truncate text-[11px] text-muted-foreground">{label}</div>
+      <div className={cn("truncate text-xl font-semibold tabular-nums leading-tight tracking-tight", tone)}>{value}</div>
       <div className="truncate text-[10px] text-muted-foreground">{hint}</div>
     </div>
   )

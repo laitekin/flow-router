@@ -857,6 +857,8 @@ export interface GatewayUsageLog {
   channel_name?: string
   source_group_name?: string
   source_api_key_name?: string
+  /** 列表省略了上游错误 body / header 等大字段时，标记还有可展开的详情（按 id 补拉） */
+  has_error_payload?: boolean
 }
 
 export interface GatewayUsagePage {
@@ -1126,4 +1128,25 @@ export interface ModelDefaultPrice {
   output_price_per_token: number
   cache_creation_price_per_token: number
   cache_read_price_per_token: number
+}
+
+/** 时间窗内用量汇总：组 / 密钥按请求计（重试只算一次），路由 / 直连渠道按尝试计 */
+export interface GatewayUsageStat {
+  requests: number
+  success: number
+  cost: number
+  tokens: number
+  avg_duration_ms: number
+  avg_first_token_ms?: number | null
+  last_at?: string | null
+}
+
+export interface GatewayUsageSummary {
+  from: string
+  to: string
+  /** key 为实体 id（JSON 对象键是字符串） */
+  groups: Record<string, GatewayUsageStat>
+  keys: Record<string, GatewayUsageStat>
+  routes: Record<string, GatewayUsageStat>
+  providers: Record<string, GatewayUsageStat>
 }

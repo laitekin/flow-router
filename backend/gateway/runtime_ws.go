@@ -78,7 +78,7 @@ func (rt *Runtime) HandleResponsesWebSocket(c *gin.Context) {
 		rt.writeWSResponsesFailed(ctx, client, "invalid_request_error", "system prompt injection failed: "+err.Error())
 		return
 	}
-	_ = rt.Keys.TouchLastUsed(key.ID, time.Now())
+	rt.touchKey(c.Request.Context(), key.ID)
 	routes, err := rt.Routes.ListByGroupID(group.ID)
 	if err != nil || len(routes) == 0 {
 		rt.writeWSResponsesFailed(ctx, client, "api_error", "no routes configured")

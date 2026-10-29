@@ -614,9 +614,9 @@ func (a *AdminService) probeRouteModel(
 }
 
 func (a *AdminService) invalidateModelsCache(groupID uint) {
-	a.modelsCacheMu.Lock()
-	delete(a.modelsCache, groupID)
-	a.modelsCacheMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = a.KV.Del(ctx, modelsCacheKey(groupID))
 }
 
 // ---------- forward ----------

@@ -299,9 +299,9 @@ Saving writes the configuration file. Applying settings hot-reloads authenticati
 
 ## Quick Start
 
-### Docker Compose with SQLite
+### Docker Compose with PostgreSQL + Redis
 
-SQLite is the default deployment mode.
+The default deployment runs PostgreSQL (persistent data), Redis (caches, throttling, job locks) and the app. See [docs/postgres-redis.md](docs/postgres-redis.md) for the design and migration guide (Chinese).
 
 ```bash
 cp .env.example .env
@@ -311,6 +311,7 @@ Edit `.env` and set at least:
 
 ```env
 APP_SECRET=replace-with-a-random-string-at-least-32-bytes
+POSTGRES_PASSWORD=replace-with-database-password
 ```
 
 `APP_SECRET` is used to encrypt sensitive fields with AES-GCM, including upstream passwords, tokens, cookies, notification channel secrets, and captcha provider API keys. If you change it later, existing encrypted data cannot be decrypted.
@@ -337,13 +338,30 @@ Default URL:
 http://localhost:8080
 ```
 
-Default database file inside the container:
+Business data lives in the PostgreSQL `pg-data` volume; runtime system settings are still persisted to `data/config.yaml` on the host. Redis only holds rebuildable data and runs without persistence.
 
-```text
-/app/data/upstream-ops.db
+### Upgrading from SQLite
+
+Old data is in `data/upstream-ops.db`. Import it into PostgreSQL with the built-in `migrate-db` command:
+
+```bash
+docker compose down
+docker compose up -d postgres redis
+docker compose run --rm app migrate-db -config /app/data/config.yaml -from-path /app/data/upstream-ops.db
+docker compose up -d
 ```
 
-The host file is `data/upstream-ops.db`. Runtime system settings are persisted to `data/config.yaml`.
+The SQLite file is only read, so you can always fall back with `docker-compose.sqlite.yml`.
+
+### Docker Compose with SQLite
+
+To run without PostgreSQL / Redis:
+
+```bash
+docker compose -f docker-compose.sqlite.yml up -d
+```
+
+The database file is `data/upstream-ops.db` on the host.
 
 ### Pin the Image Version
 
@@ -361,10 +379,10 @@ IMAGE_TAG=v0.0.9
 
 ## MySQL Deployment
 
-Use the MySQL compose file together with the base compose file:
+Layer the MySQL compose file on top of the SQLite one:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.mysql.yml up -d
+docker compose -f docker-compose.sqlite.yml -f docker-compose.mysql.yml up -d
 ```
 
 Required `.env` values:
@@ -395,6 +413,26 @@ LOG_LEVEL=info
 - `LOG_LEVEL`: log level.
 
 ### Database
+
+PostgreSQL (preconfigured in the default compose file):
+
+```env
+DATABASE_DRIVER=postgres
+DATABASE_HOST=postgres
+DATABASE_PORT=5432
+DATABASE_USER=upstreamops
+DATABASE_PASSWORD=change-me
+DATABASE_NAME=upstreamops
+DATABASE_SSLMODE=disable
+# or a single DATABASE_URL=postgres://user:pass@host:5432/db?sslmode=require
+```
+
+Redis (optional; falls back to in-process memory when unset):
+
+```env
+REDIS_URL=redis://:password@redis:6379/0
+# or REDIS_ADDR / REDIS_PASSWORD / REDIS_DB; REDIS_KEY_PREFIX defaults to flowrouter:
+```
 
 SQLite:
 

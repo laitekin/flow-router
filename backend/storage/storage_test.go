@@ -3,7 +3,6 @@ package storage
 import (
 	"fmt"
 	"math"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,24 +14,11 @@ import (
 func openTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	db, err := Open(DBConfig{
-		Driver:       DBDriverSQLite,
-		Path:         filepath.Join(t.TempDir(), "test.db"),
-		MaxOpenConns: 20,
-		MaxIdleConns: 5,
-	})
+	db, cleanup, err := OpenTestDB(t.TempDir())
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	if err := AutoMigrate(db); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("get sql.DB: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
+	t.Cleanup(cleanup)
 
 	return db
 }
@@ -772,9 +758,9 @@ func TestAutoMigrateDropsDeletedAtColumns(t *testing.T) {
 	db := openTestDB(t)
 
 	for _, ddl := range []string{
-		"ALTER TABLE channels ADD COLUMN deleted_at datetime",
-		"ALTER TABLE captcha_configs ADD COLUMN deleted_at datetime",
-		"ALTER TABLE notification_channels ADD COLUMN deleted_at datetime",
+		"ALTER TABLE channels ADD COLUMN deleted_at timestamp",
+		"ALTER TABLE captcha_configs ADD COLUMN deleted_at timestamp",
+		"ALTER TABLE notification_channels ADD COLUMN deleted_at timestamp",
 		"CREATE INDEX idx_channels_deleted_at ON channels(deleted_at)",
 		"CREATE INDEX idx_captcha_configs_deleted_at ON captcha_configs(deleted_at)",
 		"CREATE INDEX idx_notification_channels_deleted_at ON notification_channels(deleted_at)",
@@ -936,23 +922,11 @@ func TestGatewayGroupsReorderAndListOrder(t *testing.T) {
 }
 
 func TestGatewayRoutesSaveForGroupPreservesID(t *testing.T) {
-	db, err := Open(DBConfig{
-		Driver:       DBDriverSQLite,
-		Path:         filepath.Join(t.TempDir(), "gw-route-preserve.db"),
-		MaxOpenConns: 5,
-		MaxIdleConns: 2,
-	})
+	db, cleanup, err := OpenTestDB(t.TempDir())
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatalf("open test db: %v", err)
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("sql db: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := AutoMigrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	t.Cleanup(cleanup)
 
 	routes := NewGatewayRoutes(db)
 	if err := routes.SaveForGroup(7, []GatewayRoute{
@@ -1763,5 +1737,268 @@ func TestGatewayUsageChainResultModesMatchDispatchOutcomes(t *testing.T) {
 		if item.RequestID != "fl-1" {
 			t.Fatalf("chain_direct 混进了 %s，一次过只能是单次尝试就成功的链", item.RequestID)
 		}
+	}
+}
+
+func TestGatewayUsageListOmitsErrorPayload(t *testing.T) {
+	db := openTestDB(t)
+	usage := NewGatewayUsageLogs(db)
+	now := time.Now()
+	rows := []GatewayUsageLog{
+		{RequestID: "ok-1", RequestedModel: "m", Success: true, ActualCost: 1, CreatedAt: now.Add(-time.Minute)},
+		{RequestID: "fail-1", RequestedModel: "m", Success: false, ErrorType: "http", ErrorMessage: "boom",
+			UpstreamErrorBody: `{"error":"x"}`, UpstreamErrorHeaders: `[{"name":"A","values":["1"]}]`, ActualCost: 2, CreatedAt: now},
+		{RequestID: "fail-2", RequestedModel: "m", Success: false, ErrorType: "transport", ErrorMessage: "eof", ActualCost: 0, CreatedAt: now},
+		{RequestID: "old", RequestedModel: "m", Success: true, ActualCost: 5, CreatedAt: now.Add(-48 * time.Hour)},
+	}
+	for i := range rows {
+		if err := usage.Create(&rows[i]); err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+	}
+
+	from := now.Add(-time.Hour)
+	// 默认（公开 /v1/usage 等）带全部字段，行为与原来一致
+	full, err := usage.List(GatewayUsageQuery{From: &from, Page: 1, PageSize: 50})
+	if err != nil {
+		t.Fatalf("list full: %v", err)
+	}
+	for _, it := range full.Items {
+		if it.RequestID == "fail-1" && it.UpstreamErrorBody == "" {
+			t.Fatalf("default list must keep the error payload")
+		}
+	}
+
+	page, err := usage.List(GatewayUsageQuery{From: &from, Page: 1, PageSize: 50, OmitErrorPayload: true})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if page.Total != 3 || page.SumCost != 3 {
+		t.Fatalf("total/sum = %d/%v, want 3/3", page.Total, page.SumCost)
+	}
+	byReq := map[string]GatewayUsageLogItem{}
+	for _, it := range page.Items {
+		byReq[it.RequestID] = it
+	}
+	f1 := byReq["fail-1"]
+	if f1.UpstreamErrorBody != "" || f1.UpstreamErrorHeaders != "" {
+		t.Fatalf("list should omit error payload, got body=%q headers=%q", f1.UpstreamErrorBody, f1.UpstreamErrorHeaders)
+	}
+	if !f1.HasErrorPayload || f1.ErrorMessage != "boom" {
+		t.Fatalf("fail-1 should flag payload and keep message: %+v", f1)
+	}
+	if byReq["fail-2"].HasErrorPayload || byReq["ok-1"].HasErrorPayload {
+		t.Fatalf("rows without payload must not be flagged")
+	}
+
+	detail, err := usage.Get(f1.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if detail.UpstreamErrorBody != `{"error":"x"}` || detail.UpstreamErrorHeaders == "" {
+		t.Fatalf("detail should carry full payload: %+v", detail)
+	}
+}
+
+func TestGatewayUsageCreateSanitizesText(t *testing.T) {
+	db := openTestDB(t)
+	usage := NewGatewayUsageLogs(db)
+	// 按字节截断切在「错」字中间 + 夹带 NUL：PostgreSQL 会直接拒绝这种文本
+	body := "upstream \x00 error: 错"[:len("upstream \x00 error: 错")-1]
+	row := GatewayUsageLog{RequestID: "bad-utf8", RequestedModel: "m", UpstreamErrorBody: body, UserAgent: "ua\x00", CreatedAt: time.Now()}
+	if err := usage.Create(&row); err != nil {
+		t.Fatalf("create with dirty text: %v", err)
+	}
+	got, err := usage.Get(row.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.UpstreamErrorBody != "upstream  error: �" || got.UserAgent != "ua" {
+		t.Fatalf("unexpected sanitized text: body=%q ua=%q", got.UpstreamErrorBody, got.UserAgent)
+	}
+}
+
+func TestGatewayUsageFiltersAreCaseInsensitive(t *testing.T) {
+	db := openTestDB(t)
+	usage := NewGatewayUsageLogs(db)
+	if err := usage.Create(&GatewayUsageLog{RequestID: "Req-ABC-123", RequestedModel: "GPT-4o", Success: true, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, q := range []GatewayUsageQuery{{RequestID: "abc"}, {Model: "gpt*"}} {
+		page, err := usage.List(q)
+		if err != nil {
+			t.Fatalf("list %+v: %v", q, err)
+		}
+		if page.Total != 1 {
+			t.Fatalf("query %+v should match case-insensitively, got %d", q, page.Total)
+		}
+	}
+	providers := NewGatewayProviders(db)
+	if err := providers.Create(&GatewayProvider{Name: "OpenRouter", BaseURL: "https://openrouter.ai", Enabled: true}); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	opts, err := providers.ListOptions("openrouter")
+	if err != nil || len(opts) != 1 {
+		t.Fatalf("provider search should be case-insensitive: %v %d", err, len(opts))
+	}
+}
+
+func TestCopyAllPreservesDataAndSequences(t *testing.T) {
+	src, err := Open(DBConfig{Driver: DBDriverSQLite, Path: t.TempDir() + "/src.db"})
+	if err != nil {
+		t.Fatalf("open src: %v", err)
+	}
+	if err := AutoMigrate(src); err != nil {
+		t.Fatalf("migrate src: %v", err)
+	}
+	t.Cleanup(closeDB(src))
+	// Enabled=false 是 default:true 字段的零值，最容易在迁移中被默认值吞掉
+	if err := src.Create(&GatewayProvider{ID: 7, Name: "off", BaseURL: "https://x", Enabled: true}).Error; err != nil {
+		t.Fatalf("seed provider: %v", err)
+	}
+	if err := src.Model(&GatewayProvider{}).Where("id = ?", 7).Update("enabled", false).Error; err != nil {
+		t.Fatalf("disable provider: %v", err)
+	}
+	usage := NewGatewayUsageLogs(src)
+	when := time.Date(2026, 5, 1, 12, 30, 0, 0, time.UTC)
+	for i := 0; i < 1203; i++ {
+		if err := usage.Create(&GatewayUsageLog{RequestID: fmt.Sprintf("r%d", i), RequestedModel: "m", Success: i%3 != 0, CreatedAt: when.Add(time.Duration(i) * time.Second)}); err != nil {
+			t.Fatalf("seed usage: %v", err)
+		}
+	}
+	if err := src.Create(&NotificationCooldown{ChannelID: 3, Event: EventBalanceLow, LastSentAt: when}).Error; err != nil {
+		t.Fatalf("seed cooldown: %v", err)
+	}
+
+	dst := openTestDB(t)
+	results, err := CopyAll(src, dst, CopyOptions{BatchSize: 500})
+	if err != nil {
+		t.Fatalf("copy: %v", err)
+	}
+	copied := map[string]int64{}
+	for _, r := range results {
+		copied[r.Table] = r.Rows
+	}
+	if copied["gateway_usage_logs"] != 1203 || copied["gateway_providers"] != 1 || copied["notification_cooldowns"] != 1 {
+		t.Fatalf("unexpected copy counts: %+v", copied)
+	}
+
+	var p GatewayProvider
+	if err := dst.First(&p, 7).Error; err != nil {
+		t.Fatalf("load provider: %v", err)
+	}
+	if p.Enabled {
+		t.Fatalf("Enabled=false must survive the copy")
+	}
+	var failed int64
+	dst.Model(&GatewayUsageLog{}).Where("success = ?", false).Count(&failed)
+	if failed != 401 {
+		t.Fatalf("failed rows = %d, want 401", failed)
+	}
+	var first GatewayUsageLog
+	if err := dst.Order("id ASC").First(&first).Error; err != nil || !first.CreatedAt.Equal(when) {
+		t.Fatalf("timestamp not preserved: %v %v", first.CreatedAt, err)
+	}
+	// 序列必须推进到 MAX(id) 之后，否则新插入会撞主键
+	next := GatewayUsageLog{RequestID: "after-copy", RequestedModel: "m", CreatedAt: time.Now()}
+	if err := NewGatewayUsageLogs(dst).Create(&next); err != nil {
+		t.Fatalf("insert after copy: %v", err)
+	}
+	if next.ID != 1204 {
+		t.Fatalf("next id = %d, want 1204", next.ID)
+	}
+
+	if _, err := CopyAll(src, dst, CopyOptions{}); err == nil {
+		t.Fatalf("copy into non-empty target must be refused")
+	}
+}
+
+func TestOnGatewayAuthChange(t *testing.T) {
+	db := openTestDB(t)
+	var bumps int
+	if err := OnGatewayAuthChange(db, func() { bumps++ }); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	groups := NewGatewayGroups(db)
+	keys := NewGatewayKeys(db)
+	g := &GatewayGroup{Name: "g"}
+	if err := groups.Create(g); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	k := &GatewayKey{GroupID: g.ID, Name: "k", KeyHash: "h", KeyPrefix: "sk", KeyCipher: "c"}
+	if err := keys.Create(k); err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+	if bumps != 2 {
+		t.Fatalf("creates should bump twice, got %d", bumps)
+	}
+	// 每请求都会发生的写入不能让缓存失效
+	_ = keys.TouchLastUsed(k.ID, time.Now())
+	_ = keys.AddQuotaUsed(k.ID, 0.5)
+	if bumps != 2 {
+		t.Fatalf("hot-column updates must not bump, got %d", bumps)
+	}
+	k.Status = "disabled"
+	if err := keys.Update(k); err != nil {
+		t.Fatalf("update key: %v", err)
+	}
+	if bumps != 3 {
+		t.Fatalf("status change must bump, got %d", bumps)
+	}
+	// 无关表不触发
+	if err := NewGatewayUsageLogs(db).Create(&GatewayUsageLog{RequestID: "x", RequestedModel: "m", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	if err := keys.Delete(k.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if bumps != 4 {
+		t.Fatalf("delete must bump (and usage insert must not), got %d", bumps)
+	}
+}
+
+func TestGatewayUsageSummary(t *testing.T) {
+	db := openTestDB(t)
+	usage := NewGatewayUsageLogs(db)
+	now := time.Now()
+	ft := int64(1000)
+	rows := []GatewayUsageLog{
+		// 请求 a：路由 1 失败后顺延到路由 2 成功 —— 对密钥算 1 次成功请求，对路由各算 1 次尝试
+		{GatewayGroupID: 1, GatewayKeyID: 1, RouteID: 1, GatewayProviderID: 7, RequestID: "a", Success: false, DurationMS: 100, CreatedAt: now.Add(-3 * time.Minute)},
+		{GatewayGroupID: 1, GatewayKeyID: 1, RouteID: 2, RequestID: "a", Attempt: 2, Success: true, ActualCost: 0.5, InputTokens: 10, OutputTokens: 20, DurationMS: 300, FirstTokenMS: &ft, CreatedAt: now.Add(-2 * time.Minute)},
+		{GatewayGroupID: 1, GatewayKeyID: 2, RouteID: 2, RequestID: "b", Success: false, DurationMS: 200, CreatedAt: now.Add(-time.Minute)},
+		// 时间窗外
+		{GatewayGroupID: 1, GatewayKeyID: 1, RouteID: 1, RequestID: "old", Success: true, ActualCost: 9, CreatedAt: now.Add(-48 * time.Hour)},
+	}
+	for i := range rows {
+		rows[i].RequestedModel = "m"
+		if err := usage.Create(&rows[i]); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+	sum, err := usage.Summary(now.Add(-24*time.Hour), now)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	k1 := sum.Keys[1]
+	if k1 == nil || k1.Requests != 1 || k1.Success != 1 || k1.Cost != 0.5 || k1.Tokens != 30 {
+		t.Fatalf("key 1 = %+v", k1)
+	}
+	// PG 存微秒精度，比较时容忍亚毫秒差异
+	if k1.LastAt == nil || k1.LastAt.Sub(rows[1].CreatedAt).Abs() > time.Millisecond {
+		t.Fatalf("key 1 last_at = %v, want %v", k1.LastAt, rows[1].CreatedAt)
+	}
+	g := sum.Groups[1]
+	if g.Requests != 2 || g.Success != 1 || g.AvgDurationMS != 200 || g.AvgFirstTokenMS == nil || *g.AvgFirstTokenMS != 1000 {
+		t.Fatalf("group = %+v", g)
+	}
+	if r1 := sum.Routes[1]; r1.Requests != 1 || r1.Success != 0 {
+		t.Fatalf("route 1 = %+v", r1)
+	}
+	if r2 := sum.Routes[2]; r2.Requests != 2 || r2.Success != 1 {
+		t.Fatalf("route 2 = %+v", r2)
+	}
+	if p := sum.Providers[7]; p == nil || p.Requests != 1 {
+		t.Fatalf("provider 7 = %+v", p)
 	}
 }

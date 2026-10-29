@@ -1,5 +1,5 @@
 import { useState, type Dispatch, type SetStateAction } from "react"
-import { Check, ChevronDown, Play, Plus } from "lucide-react"
+import { Check, ChevronDown, Play, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -27,13 +27,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { formatRatio } from "@/lib/format"
+import { formatDurationMS, formatRatio } from "@/lib/format"
+import { StatLine, SUMMARY_WINDOW_LABEL } from "./usage-stat"
 import type {
   GatewayProviderOption,
   GatewayRateConvertMode,
   GatewayRoute,
   GatewayRouteSourceKind,
   GatewayUpstreamProtocol,
+  GatewayUsageStat,
   GatewayUserAgentMode,
   RateSnapshot,
 } from "@/lib/api-types"
@@ -206,6 +208,8 @@ type RoutesPanelProps = {
   onClearRoutePause: (routeID?: number) => void
   onShowPauseError: (route: Partial<GatewayRoute>) => void
   highlightedRouteID?: number | null
+  /** 各路由 24h 用量（按尝试计，key 为路由 id） */
+  stats?: Record<string, GatewayUsageStat>
 }
 
 export function RoutesPanel({
@@ -227,6 +231,7 @@ export function RoutesPanel({
   onClearRoutePause,
   onShowPauseError,
   highlightedRouteID,
+  stats,
 }: RoutesPanelProps) {
   return (
     <div className="space-y-4">
@@ -300,6 +305,10 @@ export function RoutesPanel({
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-8 text-center" title="尝试顺序">#</TableHead>
+            <TableHead className="min-w-40" title="按尝试计：每次重试 / 顺延都算一次">
+              {SUMMARY_WINDOW_LABEL} 健康
+            </TableHead>
             <TableHead>类型</TableHead>
             <TableHead>来源</TableHead>
             <TableHead>源分组</TableHead>
@@ -314,7 +323,7 @@ export function RoutesPanel({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {sortedRouteRows.map(({ route: r, index: idx }) => {
+          {sortedRouteRows.map(({ route: r, index: idx }, order) => {
             const kind = routeSourceKind(r)
             const chId = Number(r.source_channel_id) || 0
             const providerID = Number(r.gateway_provider_id) || 0
@@ -339,9 +348,34 @@ export function RoutesPanel({
                 className={cn(
                   "transition-colors duration-300",
                   highlightedRouteID === r.id &&
-                    "bg-primary/10 shadow-[inset_3px_0_0_hsl(var(--primary))] ring-1 ring-inset ring-primary/40",
+                    "bg-primary/10 ring-1 ring-inset ring-primary/40",
                 )}
               >
+                <TableCell className="text-center text-xs tabular-nums text-muted-foreground">
+                  {order + 1}
+                </TableCell>
+                <TableCell>
+                  {r.id ? (
+                    <div className="space-y-0.5">
+                      {isRouteTempPaused(r.temp_unschedulable_until) ? (
+                        <div className="text-[11px] font-medium text-red-600 dark:text-red-400">
+                          冷却中 · 本次跳过
+                        </div>
+                      ) : r.enabled === false ? (
+                        <div className="text-[11px] text-muted-foreground">已停用</div>
+                      ) : null}
+                      <StatLine stat={stats?.[String(r.id)]} showCost={false} />
+                      {stats?.[String(r.id)]?.avg_first_token_ms != null ? (
+                        <div className="text-[11px] tabular-nums text-muted-foreground">
+                          首字 {formatDurationMS(stats[String(r.id)].avg_first_token_ms)} · 费用 $
+                          {stats[String(r.id)].cost.toFixed(2)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">保存后统计</span>
+                  )}
+                </TableCell>
                 <TableCell>
                   <Select
                     value={kind}
@@ -678,6 +712,7 @@ export function RoutesPanel({
                     }}
                   />
                 </TableCell>
+
                 <TableCell className="text-xs max-w-36">
                   <div className="truncate">
                     {kind === "provider" ? (
@@ -738,13 +773,15 @@ export function RoutesPanel({
                 </TableCell>
                 <TableCell className="text-right">
                   <Button
-                    size="sm"
-                    variant="outline"
+                    size="icon"
+                    variant="ghost"
+                    className="size-8 text-muted-foreground hover:text-destructive"
+                    title="删除路由（保存后生效）"
                     onClick={() =>
                       setRouteDrafts((prev) => prev.filter((_, i) => i !== idx))
                     }
                   >
-                    删除
+                    <Trash2 className="size-3.5" />
                   </Button>
                 </TableCell>
               </TableRow>
@@ -752,7 +789,7 @@ export function RoutesPanel({
           })}
           {routeDrafts.length === 0 && (
             <TableRow>
-              <TableCell colSpan={11} className="text-center text-muted-foreground">
+              <TableCell colSpan={13} className="text-center text-muted-foreground">
                 添加路由后保存。监控渠道需「确保上游密钥」；直连渠道使用已配置的 Key
               </TableCell>
             </TableRow>

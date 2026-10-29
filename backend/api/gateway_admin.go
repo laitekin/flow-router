@@ -4,6 +4,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/bejix/upstream-ops/backend/gateway"
 	"github.com/bejix/upstream-ops/backend/storage"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // registerGatewayAdmin 在管理 API 下注册 /gateway/* 路由。
@@ -62,13 +64,15 @@ func registerGatewayAdmin(g *gin.RouterGroup, d *Deps) {
 		gp.POST("/providers/:id/reveal", func(c *gin.Context) { revealGatewayProvider(c, d) })
 
 		// usage
-		gp.GET("/dispatch/stats", func(c *gin.Context) { statsGatewayDispatch(c, d) })
-		gp.GET("/dispatch/trends", func(c *gin.Context) { trendsGatewayDispatch(c, d) })
-		gp.GET("/dispatch/errors", func(c *gin.Context) { errorsGatewayDispatch(c, d) })
-		gp.GET("/dispatch/flow", func(c *gin.Context) { flowGatewayDispatch(c, d) })
+		gp.GET("/dispatch/stats", cachedGET(d, statsCacheTTL, func(c *gin.Context) { statsGatewayDispatch(c, d) }))
+		gp.GET("/dispatch/trends", cachedGET(d, statsCacheTTL, func(c *gin.Context) { trendsGatewayDispatch(c, d) }))
+		gp.GET("/dispatch/errors", cachedGET(d, statsCacheTTL, func(c *gin.Context) { errorsGatewayDispatch(c, d) }))
+		gp.GET("/dispatch/flow", cachedGET(d, statsCacheTTL, func(c *gin.Context) { flowGatewayDispatch(c, d) }))
+		gp.GET("/stats/summary", cachedGET(d, statsCacheTTL, func(c *gin.Context) { summaryGatewayUsage(c, d) }))
 		gp.GET("/usage", func(c *gin.Context) { listGatewayUsage(c, d) })
-		gp.GET("/usage/stats", func(c *gin.Context) { statsGatewayUsage(c, d) })
-		gp.GET("/usage/models", func(c *gin.Context) { listGatewayUsageModels(c, d) })
+		gp.GET("/usage/stats", cachedGET(d, statsCacheTTL, func(c *gin.Context) { statsGatewayUsage(c, d) }))
+		gp.GET("/usage/models", cachedGET(d, statsCacheTTL, func(c *gin.Context) { listGatewayUsageModels(c, d) }))
+		gp.GET("/usage/detail/:id", func(c *gin.Context) { getGatewayUsageDetail(c, d) })
 		gp.POST("/usage/cleanup", func(c *gin.Context) { cleanupGatewayUsage(c, d) })
 
 		// prices
@@ -752,12 +756,36 @@ func parseUsageTime(v string) (time.Time, bool) {
 
 func listGatewayUsage(c *gin.Context, d *Deps) {
 	q := parseGatewayUsageQuery(c)
+	// 后台列表不带上游错误大字段，展开时走 /usage/detail/:id
+	q.OmitErrorPayload = true
 	page, err := d.GatewayUsage.List(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, page)
+}
+
+// summaryGatewayUsage 网关组 / 密钥 / 路由 / 直连渠道在时间窗内的用量汇总，供管理端列表展示。
+// window: 1h | 24h（默认）| 7d
+func summaryGatewayUsage(c *gin.Context, d *Deps) {
+	if d.GatewayUsage == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage storage unavailable"})
+		return
+	}
+	windows := map[string]time.Duration{"1h": time.Hour, "24h": 24 * time.Hour, "7d": 7 * 24 * time.Hour}
+	win, ok := windows[c.DefaultQuery("window", "24h")]
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "window must be one of 1h, 24h, 7d"})
+		return
+	}
+	to := time.Now()
+	sum, err := d.GatewayUsage.Summary(to.Add(-win), to)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, sum)
 }
 
 func statsGatewayUsage(c *gin.Context, d *Deps) {
@@ -768,6 +796,29 @@ func statsGatewayUsage(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(http.StatusOK, stats)
+}
+
+// getGatewayUsageDetail 单条使用记录完整内容（列表省略的上游错误 body / header 等）。
+func getGatewayUsageDetail(c *gin.Context, d *Deps) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if d.GatewayUsage == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage storage unavailable"})
+		return
+	}
+	item, err := d.GatewayUsage.Get(uint(id))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "记录不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, item)
 }
 
 // listGatewayUsageModels 使用记录中出现过的模型聚合（下拉选项）。

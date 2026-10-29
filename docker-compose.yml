@@ -1,15 +1,61 @@
 name: upstream-ops
 
+# 默认部署：PostgreSQL（持久化数据）+ Redis（缓存 / 节流 / 任务锁）+ 应用。
+#
+#   docker compose up -d
+#
+# 仍想用单文件 SQLite：docker compose -f docker-compose.sqlite.yml up -d
+# 从旧版 SQLite 升级：见 docs/postgres-redis.md「从 SQLite 迁移」。
+
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      POSTGRES_DB: ${POSTGRES_DB:-upstreamops}
+      POSTGRES_USER: ${POSTGRES_USER:-upstreamops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required, set it in .env}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-upstreamops} -d ${POSTGRES_DB:-upstreamops}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # 只放可重建数据（缓存 / 节流 / 锁），不开持久化；内存满了按 LRU 淘汰
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "${REDIS_MAXMEMORY:-256mb}", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
   app:
     image: ghcr.io/bejix/upstream-ops:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: ["-config", "/app/data/config.yaml"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       SERVER_PORT: 8418
-      DATABASE_DRIVER: sqlite
-      DATABASE_PATH: /app/data/upstream-ops.db
+      DATABASE_DRIVER: postgres
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${POSTGRES_USER:-upstreamops}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_NAME: ${POSTGRES_DB:-upstreamops}
+      DATABASE_SSLMODE: disable
+      REDIS_ADDR: redis:6379
       SERVER_MODE: ${SERVER_MODE:-release}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       APP_SECRET: ${APP_SECRET:?APP_SECRET is required, set it in .env}
@@ -21,6 +67,7 @@ services:
     ports:
       - "${HTTP_PORT:-8080}:8418"
     volumes:
+      # config.yaml 仍在这里；旧版 SQLite 文件（如有）也在这里，供 migrate-db 读取
       - ./data:/app/data
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:8418/healthz >/dev/null"]
@@ -28,3 +75,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+volumes:
+  pg-data:

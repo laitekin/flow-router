@@ -5,10 +5,12 @@ package api
 
 import (
 	"context"
+	"github.com/bejix/upstream-ops/backend/kv"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/bejix/upstream-ops/backend/channel"
 	"github.com/bejix/upstream-ops/backend/connector"
@@ -70,6 +72,8 @@ type Deps struct {
 	GatewayUsage  *storage.GatewayUsageLogs
 	ModelPrices   *storage.ModelPriceOverrides
 	Log           *slog.Logger
+	// KV 缓存后端（Redis 或内存）；nil 时聚合接口不缓存
+	KV kv.Store
 
 	// Frontend 可选：传入嵌入的前端 dist 文件系统。nil 表示不挂载（本地开发用 vite dev server）。
 	Frontend fs.FS
@@ -87,7 +91,21 @@ func Register(r *gin.Engine, d *Deps) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "db_down", "err": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		resp := gin.H{"status": "ok"}
+		if d.KV != nil {
+			// Redis 只承载可重建数据，挂了服务照常可用（回落数据库），这里只报告不判失败
+			resp["kv"] = d.KV.Backend()
+			if p, ok := d.KV.(interface{ Ping(context.Context) error }); ok {
+				ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
+				if err := p.Ping(ctx); err != nil {
+					resp["kv_status"] = "degraded"
+				} else {
+					resp["kv_status"] = "ok"
+				}
+				cancel()
+			}
+		}
+		c.JSON(http.StatusOK, resp)
 	})
 
 	// 公开网关：/v1/*（不走管理端鉴权）。管理页 SPA 使用 /gateway，勿占用。

@@ -515,7 +515,7 @@ type GatewayUsageLog struct {
 	// 本条失败后写入的冷却截止（若有），便于日志展示
 	CooldownUntil     *time.Time `json:"cooldown_until,omitempty"`
 	RequestedModel    string     `gorm:"size:256;not null;index" json:"requested_model"`
-	UpstreamModel     string     `gorm:"size:256" json:"upstream_model,omitempty"`
+	UpstreamModel     string     `gorm:"size:256;index" json:"upstream_model,omitempty"`
 	ModelMappingChain string     `gorm:"size:512" json:"model_mapping_chain,omitempty"`
 	InboundEndpoint   string     `gorm:"size:128" json:"inbound_endpoint,omitempty"`
 	UpstreamEndpoint  string     `gorm:"size:128" json:"upstream_endpoint,omitempty"`

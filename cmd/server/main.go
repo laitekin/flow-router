@@ -18,6 +18,7 @@ import (
 	"github.com/bejix/upstream-ops/backend/config"
 	"github.com/bejix/upstream-ops/backend/crypto"
 	"github.com/bejix/upstream-ops/backend/gateway"
+	"github.com/bejix/upstream-ops/backend/kv"
 	"github.com/bejix/upstream-ops/backend/logger"
 	"github.com/bejix/upstream-ops/backend/monitor"
 	"github.com/bejix/upstream-ops/backend/notify"
@@ -33,6 +34,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "migrate-db" {
+		os.Exit(runMigrateDB(os.Args[2:]))
+	}
 	configPath := flag.String("config", "", "path to config.yaml (optional; env vars also supported)")
 	flag.Parse()
 
@@ -92,6 +96,12 @@ func main() {
 		log.Error("auto migrate failed", "err", err)
 		os.Exit(1)
 	}
+	warnIfLegacySQLiteLeftBehind(log, cfg.Database, db)
+
+	// 可选 Redis：缓存 / 节流 / 任务锁。未配置或连不上时回落进程内内存，不影响启动。
+	kvStore := kv.Open(context.Background(), cfg.Redis.ToKV(), log)
+	defer kvStore.Close()
+	log.Info("kv backend ready", "backend", kvStore.Backend())
 
 	channels := storage.NewChannels(db)
 	authSessions := storage.NewAuthSessions(db)
@@ -112,6 +122,12 @@ func main() {
 	channelSvc.UpdateUpstreamConfig(cfg.Upstream)
 	gatewaySvc := gateway.NewService(gatewayGroups, gatewayKeys, gatewayRoutes, gatewayUsage, modelPrices, channels, channelSvc, cipher, log)
 	gatewaySvc.SetProviders(gatewayProviders)
+	gatewaySvc.SetKV(kvStore)
+	// 密钥 / 分组的任何写入都让鉴权缓存立即失效（Redis 时所有实例同时生效）
+	if err := storage.OnGatewayAuthChange(db, gatewaySvc.InvalidateAuthCache); err != nil {
+		log.Error("register auth cache invalidation failed", "err", err)
+		os.Exit(1)
+	}
 	gatewaySvc.UpdateProxyConfig(cfg.Proxy)
 	gatewaySvc.UpdateUpstreamConfig(cfg.Upstream)
 	gatewaySvc.UpdateGatewayConfig(cfg.Gateway)
@@ -132,7 +148,9 @@ func main() {
 	monitorSvc := monitor.NewService(channels, announcements, rates, monLogs, channelSvc, dispatcher, log)
 
 	schedulerFactory := func(scfg config.SchedulerConfig, pcfg config.ProxyConfig) *scheduler.Scheduler {
-		return scheduler.New(scfg, monitorSvc, monLogs, rates, notifies, announcements, captchas, cipher, gatewaySvc, pcfg, log)
+		sch := scheduler.New(scfg, monitorSvc, monLogs, rates, notifies, announcements, captchas, cipher, gatewaySvc, pcfg, log)
+		sch.SetKV(kvStore)
+		return sch
 	}
 	sch := schedulerFactory(cfg.Scheduler, cfg.Proxy)
 	if err := sch.Start(); err != nil {
@@ -192,6 +210,7 @@ func main() {
 		GatewayKeys:   gatewayKeys,
 		GatewayUsage:  gatewayUsage,
 		ModelPrices:   modelPrices,
+		KV:            kvStore,
 		Log:           log,
 		Frontend:      frontendFS,
 	})

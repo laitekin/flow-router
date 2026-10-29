@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/bejix/upstream-ops/backend/connector"
@@ -36,21 +35,11 @@ func (f *fakeChannelAPIForResort) RevealAPIKey(ctx context.Context, channelID ui
 
 func openGatewayTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := storage.Open(storage.DBConfig{
-		Driver: storage.DBDriverSQLite,
-		Path:   filepath.Join(t.TempDir(), "gateway-test.db"),
-	})
+	db, cleanup, err := storage.OpenTestDB(t.TempDir())
 	if err != nil {
-		t.Fatalf("open db: %v", err)
+		t.Fatalf("open test db: %v", err)
 	}
-	if err := storage.AutoMigrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("db handle: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
+	t.Cleanup(cleanup)
 	return db
 }
 

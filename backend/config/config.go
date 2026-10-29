@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bejix/upstream-ops/backend/kv"
 	"github.com/bejix/upstream-ops/backend/storage"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -17,6 +18,7 @@ type Config struct {
 	App           AppConfig           `mapstructure:"app" yaml:"app" json:"app"`
 	Server        ServerConfig        `mapstructure:"server" yaml:"server" json:"server"`
 	Database      DatabaseConfig      `mapstructure:"database" yaml:"database" json:"database"`
+	Redis         RedisConfig         `mapstructure:"redis" yaml:"redis" json:"redis"`
 	Security      SecurityConfig      `mapstructure:"security" yaml:"security" json:"security"`
 	Auth          AuthConfig          `mapstructure:"auth" yaml:"auth" json:"auth"`
 	Scheduler     SchedulerConfig     `mapstructure:"scheduler" yaml:"scheduler" json:"scheduler"`
@@ -50,6 +52,10 @@ type DatabaseConfig struct {
 	Name         string `mapstructure:"name" yaml:"name" json:"name"`
 	MaxOpenConns int    `mapstructure:"maxOpenConns" yaml:"maxOpenConns" json:"maxOpenConns"`
 	MaxIdleConns int    `mapstructure:"maxIdleConns" yaml:"maxIdleConns" json:"maxIdleConns"`
+	// SSLMode 仅 PostgreSQL（disable / require / verify-full），默认 disable
+	SSLMode string `mapstructure:"sslMode" yaml:"sslMode" json:"sslMode"`
+	// URL 完整连接串（DATABASE_URL），非空时优先于 host/port/user 等分项
+	URL string `mapstructure:"url" yaml:"url" json:"url"`
 }
 
 func (d DatabaseConfig) ToStorageConfig() storage.DBConfig {
@@ -63,7 +69,24 @@ func (d DatabaseConfig) ToStorageConfig() storage.DBConfig {
 		Name:         d.Name,
 		MaxOpenConns: d.MaxOpenConns,
 		MaxIdleConns: d.MaxIdleConns,
+		SSLMode:      d.SSLMode,
+		DSN:          d.URL,
 	}
+}
+
+// RedisConfig 可选的 Redis：配置了就用于缓存 / 节流 / 分布式锁（多实例共享），
+// 不配置或连不上时回落进程内内存，功能不受影响。持久化数据不放 Redis。
+type RedisConfig struct {
+	// URL 如 redis://:password@host:6379/0 或 rediss://…（TLS），优先于 Addr
+	URL       string `mapstructure:"url" yaml:"url" json:"url"`
+	Addr      string `mapstructure:"addr" yaml:"addr" json:"addr"`
+	Password  string `mapstructure:"password" yaml:"password" json:"password"`
+	DB        int    `mapstructure:"db" yaml:"db" json:"db"`
+	KeyPrefix string `mapstructure:"keyPrefix" yaml:"keyPrefix" json:"keyPrefix"`
+}
+
+func (r RedisConfig) ToKV() kv.RedisConfig {
+	return kv.RedisConfig{URL: r.URL, Addr: r.Addr, Password: r.Password, DB: r.DB, KeyPrefix: r.KeyPrefix}
 }
 
 type SecurityConfig struct {
@@ -369,6 +392,13 @@ func load(path string, withEnv bool) (*Config, string, error) {
 		_ = v.BindEnv("database.user", "DATABASE_USER")
 		_ = v.BindEnv("database.password", "DATABASE_PASSWORD")
 		_ = v.BindEnv("database.name", "DATABASE_NAME")
+		_ = v.BindEnv("database.sslMode", "DATABASE_SSLMODE")
+		_ = v.BindEnv("database.url", "DATABASE_URL")
+		_ = v.BindEnv("redis.url", "REDIS_URL")
+		_ = v.BindEnv("redis.addr", "REDIS_ADDR")
+		_ = v.BindEnv("redis.password", "REDIS_PASSWORD")
+		_ = v.BindEnv("redis.db", "REDIS_DB")
+		_ = v.BindEnv("redis.keyPrefix", "REDIS_KEY_PREFIX")
 		_ = v.BindEnv("server.port", "SERVER_PORT")
 		_ = v.BindEnv("server.mode", "SERVER_MODE")
 		_ = v.BindEnv("log.level", "LOG_LEVEL")
@@ -450,8 +480,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.driver", "sqlite")
 	v.SetDefault("database.path", "./data/upstream-ops.db")
 	v.SetDefault("database.host", "localhost")
-	v.SetDefault("database.port", 3306)
+	// 0 = 按驱动取默认端口（mysql 3306 / postgres 5432）
+	v.SetDefault("database.port", 0)
 	v.SetDefault("database.name", "upstreamops")
+	v.SetDefault("redis.keyPrefix", "flowrouter:")
 	v.SetDefault("database.maxOpenConns", 20)
 	v.SetDefault("database.maxIdleConns", 5)
 

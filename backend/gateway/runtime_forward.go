@@ -53,7 +53,7 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 	serviceTier, reasoningEffort := ExtractMetaFromBody(body)
 	// thinking 是否开启：国产模型无 effort 档位时，按上游映射模型补默认 high（对齐 sub2api）
 	thinkingEnabled := bodyHasThinkingEnabled(body)
-	_ = rt.Keys.TouchLastUsed(key.ID, time.Now())
+	rt.touchKey(c.Request.Context(), key.ID)
 
 	routes, err := rt.Routes.ListByGroupID(group.ID)
 	if err != nil || len(routes) == 0 {
