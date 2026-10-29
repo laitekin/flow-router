@@ -3,7 +3,6 @@ package storage
 import (
 	"fmt"
 	"math"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,24 +14,11 @@ import (
 func openTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	db, err := Open(DBConfig{
-		Driver:       DBDriverSQLite,
-		Path:         filepath.Join(t.TempDir(), "test.db"),
-		MaxOpenConns: 20,
-		MaxIdleConns: 5,
-	})
+	db, cleanup, err := OpenTestDB(t.TempDir())
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	if err := AutoMigrate(db); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("get sql.DB: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
+	t.Cleanup(cleanup)
 
 	return db
 }
@@ -772,9 +758,9 @@ func TestAutoMigrateDropsDeletedAtColumns(t *testing.T) {
 	db := openTestDB(t)
 
 	for _, ddl := range []string{
-		"ALTER TABLE channels ADD COLUMN deleted_at datetime",
-		"ALTER TABLE captcha_configs ADD COLUMN deleted_at datetime",
-		"ALTER TABLE notification_channels ADD COLUMN deleted_at datetime",
+		"ALTER TABLE channels ADD COLUMN deleted_at timestamp",
+		"ALTER TABLE captcha_configs ADD COLUMN deleted_at timestamp",
+		"ALTER TABLE notification_channels ADD COLUMN deleted_at timestamp",
 		"CREATE INDEX idx_channels_deleted_at ON channels(deleted_at)",
 		"CREATE INDEX idx_captcha_configs_deleted_at ON captcha_configs(deleted_at)",
 		"CREATE INDEX idx_notification_channels_deleted_at ON notification_channels(deleted_at)",
@@ -936,23 +922,11 @@ func TestGatewayGroupsReorderAndListOrder(t *testing.T) {
 }
 
 func TestGatewayRoutesSaveForGroupPreservesID(t *testing.T) {
-	db, err := Open(DBConfig{
-		Driver:       DBDriverSQLite,
-		Path:         filepath.Join(t.TempDir(), "gw-route-preserve.db"),
-		MaxOpenConns: 5,
-		MaxIdleConns: 2,
-	})
+	db, cleanup, err := OpenTestDB(t.TempDir())
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatalf("open test db: %v", err)
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("sql db: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := AutoMigrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	t.Cleanup(cleanup)
 
 	routes := NewGatewayRoutes(db)
 	if err := routes.SaveForGroup(7, []GatewayRoute{
@@ -1812,5 +1786,48 @@ func TestGatewayUsageListOmitsErrorPayload(t *testing.T) {
 	}
 	if detail.UpstreamErrorBody != `{"error":"x"}` || detail.UpstreamErrorHeaders == "" {
 		t.Fatalf("detail should carry full payload: %+v", detail)
+	}
+}
+
+func TestGatewayUsageCreateSanitizesText(t *testing.T) {
+	db := openTestDB(t)
+	usage := NewGatewayUsageLogs(db)
+	// 按字节截断切在「错」字中间 + 夹带 NUL：PostgreSQL 会直接拒绝这种文本
+	body := "upstream \x00 error: 错"[:len("upstream \x00 error: 错")-1]
+	row := GatewayUsageLog{RequestID: "bad-utf8", RequestedModel: "m", UpstreamErrorBody: body, UserAgent: "ua\x00", CreatedAt: time.Now()}
+	if err := usage.Create(&row); err != nil {
+		t.Fatalf("create with dirty text: %v", err)
+	}
+	got, err := usage.Get(row.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.UpstreamErrorBody != "upstream  error: �" || got.UserAgent != "ua" {
+		t.Fatalf("unexpected sanitized text: body=%q ua=%q", got.UpstreamErrorBody, got.UserAgent)
+	}
+}
+
+func TestGatewayUsageFiltersAreCaseInsensitive(t *testing.T) {
+	db := openTestDB(t)
+	usage := NewGatewayUsageLogs(db)
+	if err := usage.Create(&GatewayUsageLog{RequestID: "Req-ABC-123", RequestedModel: "GPT-4o", Success: true, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, q := range []GatewayUsageQuery{{RequestID: "abc"}, {Model: "gpt*"}} {
+		page, err := usage.List(q)
+		if err != nil {
+			t.Fatalf("list %+v: %v", q, err)
+		}
+		if page.Total != 1 {
+			t.Fatalf("query %+v should match case-insensitively, got %d", q, page.Total)
+		}
+	}
+	providers := NewGatewayProviders(db)
+	if err := providers.Create(&GatewayProvider{Name: "OpenRouter", BaseURL: "https://openrouter.ai", Enabled: true}); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	opts, err := providers.ListOptions("openrouter")
+	if err != nil || len(opts) != 1 {
+		t.Fatalf("provider search should be case-insensitive: %v %d", err, len(opts))
 	}
 }

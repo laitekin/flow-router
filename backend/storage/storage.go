@@ -4,6 +4,7 @@ package storage
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	sqliteDriver "github.com/glebarez/sqlite"
 	mysqlDriver "gorm.io/driver/mysql"
+	postgresDriver "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -19,9 +21,22 @@ import (
 type DBDriver string
 
 const (
-	DBDriverSQLite DBDriver = "sqlite"
-	DBDriverMySQL  DBDriver = "mysql"
+	DBDriverSQLite   DBDriver = "sqlite"
+	DBDriverMySQL    DBDriver = "mysql"
+	DBDriverPostgres DBDriver = "postgres"
 )
+
+// normalizeDriver 统一驱动名：postgresql / pg / pgsql 都按 postgres 处理。
+func normalizeDriver(d DBDriver) DBDriver {
+	switch strings.ToLower(strings.TrimSpace(string(d))) {
+	case "", "sqlite", "sqlite3":
+		return DBDriverSQLite
+	case "postgres", "postgresql", "pg", "pgsql":
+		return DBDriverPostgres
+	default:
+		return DBDriver(strings.ToLower(strings.TrimSpace(string(d))))
+	}
+}
 
 type DBConfig struct {
 	Driver       DBDriver
@@ -33,6 +48,19 @@ type DBConfig struct {
 	Name         string
 	MaxOpenConns int
 	MaxIdleConns int
+	// SSLMode 仅 PostgreSQL：disable / require / verify-full 等，空为 disable
+	SSLMode string
+	// Schema 仅 PostgreSQL：指定 search_path，空为默认 public（测试用它隔离）
+	Schema string
+	// DSN 完整连接串，非空时优先于上面的分项（如 postgres://user:pass@host/db?sslmode=require）
+	DSN string
+}
+
+func (c DBConfig) port(def int) int {
+	if c.Port > 0 {
+		return c.Port
+	}
+	return def
 }
 
 func (c DBConfig) SQLitePath() string {
@@ -45,8 +73,36 @@ func (c DBConfig) SQLitePath() string {
 func (c DBConfig) MySQLDSN() string {
 	return fmt.Sprintf(
 		"%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		c.User, c.Password, c.Host, c.Port, c.Name,
+		c.User, c.Password, c.Host, c.port(3306), c.Name,
 	)
+}
+
+// PostgresDSN 用 URL 形式拼连接串，用户名 / 密码里的特殊字符由 url 负责转义。
+func (c DBConfig) PostgresDSN() string {
+	if dsn := strings.TrimSpace(c.DSN); dsn != "" {
+		return dsn
+	}
+	host := strings.TrimSpace(c.Host)
+	if host == "" {
+		host = "localhost"
+	}
+	u := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(c.User, c.Password),
+		Host:   fmt.Sprintf("%s:%d", host, c.port(5432)),
+		Path:   "/" + c.Name,
+	}
+	q := url.Values{}
+	sslMode := strings.TrimSpace(c.SSLMode)
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+	q.Set("sslmode", sslMode)
+	if schema := strings.TrimSpace(c.Schema); schema != "" {
+		q.Set("search_path", schema)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // newGormLogger 关掉 GORM 默认 logger 对 ErrRecordNotFound 的告警噪音。
@@ -67,10 +123,7 @@ func newGormLogger() logger.Interface {
 }
 
 func Open(cfg DBConfig) (*gorm.DB, error) {
-	driver := DBDriver(strings.ToLower(string(cfg.Driver)))
-	if driver == "" {
-		driver = DBDriverSQLite
-	}
+	driver := normalizeDriver(cfg.Driver)
 
 	var dialector gorm.Dialector
 	switch driver {
@@ -81,7 +134,13 @@ func Open(cfg DBConfig) (*gorm.DB, error) {
 		}
 		dialector = sqliteDriver.Open(path)
 	case DBDriverMySQL:
-		dialector = mysqlDriver.Open(cfg.MySQLDSN())
+		dsn := cfg.MySQLDSN()
+		if strings.TrimSpace(cfg.DSN) != "" {
+			dsn = cfg.DSN
+		}
+		dialector = mysqlDriver.Open(dsn)
+	case DBDriverPostgres:
+		dialector = postgresDriver.Open(cfg.PostgresDSN())
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Driver)
 	}
@@ -110,6 +169,9 @@ func Open(cfg DBConfig) (*gorm.DB, error) {
 	default:
 		sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 		sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+		// 连接池里的长连接定期换新，避免被中间的 LB / pgbouncer 静默断开后报错
+		sqlDB.SetConnMaxLifetime(30 * time.Minute)
+		sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 	}
 
 	return db, nil

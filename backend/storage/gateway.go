@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -56,7 +57,8 @@ func (r *GatewayProviders) List(q GatewayProviderQuery) (*GatewayProviderPage, e
 	}
 	if s := strings.TrimSpace(q.Q); s != "" {
 		like := "%" + s + "%"
-		db = db.Where("name LIKE ? OR base_url LIKE ?", like, like)
+		op := likeOp(db)
+		db = db.Where("name "+op+" ? OR base_url "+op+" ?", like, like)
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
@@ -85,7 +87,8 @@ func (r *GatewayProviders) ListOptions(q string) ([]GatewayProvider, error) {
 	db := r.db.Model(&GatewayProvider{}).Where("enabled = ?", true)
 	if s := strings.TrimSpace(q); s != "" {
 		like := "%" + s + "%"
-		db = db.Where("name LIKE ? OR base_url LIKE ?", like, like)
+		op := likeOp(db)
+		db = db.Where("name "+op+" ? OR base_url "+op+" ?", like, like)
 	}
 	var items []GatewayProvider
 	if err := db.Order("name ASC").Limit(500).Find(&items).Error; err != nil {
@@ -2023,7 +2026,37 @@ func (r *GatewayUsageLogs) Create(item *GatewayUsageLog) error {
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = time.Now()
 	}
+	sanitizeUsageText(item)
 	return r.db.Create(item).Error
+}
+
+// sanitizeUsageText 清洗来自上游 / 客户端的自由文本。
+//
+// PostgreSQL 的 text 拒收 \x00 和非法 UTF-8；上游错误 body 按字节截断时可能切在多字节
+// 字符中间，或者本身就是二进制垃圾，不清洗的话整条用量记录会插入失败、计费丢失。
+// SQLite / MySQL 上同样无害。
+func sanitizeUsageText(item *GatewayUsageLog) {
+	for _, f := range []*string{
+		&item.ErrorMessage, &item.ErrorDetail, &item.UpstreamErrorBody, &item.UpstreamErrorHeaders,
+		&item.UpstreamURL, &item.UserAgent, &item.IPAddress, &item.RequestedModel, &item.UpstreamModel,
+		&item.ModelMappingChain, &item.InboundEndpoint, &item.UpstreamEndpoint, &item.ReasoningEffort,
+		&item.ServiceTier, &item.RequestID,
+	} {
+		*f = cleanDBText(*f)
+	}
+}
+
+func cleanDBText(v string) string {
+	if v == "" {
+		return v
+	}
+	if strings.IndexByte(v, 0) >= 0 {
+		v = strings.ReplaceAll(v, "\x00", "")
+	}
+	if !utf8.ValidString(v) {
+		v = strings.ToValidUTF8(v, "\uFFFD")
+	}
+	return v
 }
 
 // CountBefore 统计 created_at < before 的记录数。
@@ -2184,13 +2217,14 @@ func (r *GatewayUsageLogs) applyFilters(db *gorm.DB, q GatewayUsageQuery) *gorm.
 			if !strings.Contains(like, "%") {
 				like = "%" + like + "%"
 			}
-			db = db.Where("requested_model LIKE ? OR upstream_model LIKE ?", like, like)
+			op := likeOp(db)
+			db = db.Where("requested_model "+op+" ? OR upstream_model "+op+" ?", like, like)
 		} else {
 			db = db.Where("requested_model = ? OR upstream_model = ?", m, m)
 		}
 	}
 	if rid := strings.TrimSpace(q.RequestID); rid != "" {
-		db = db.Where("request_id LIKE ?", "%"+rid+"%")
+		db = db.Where("request_id "+likeOp(db)+" ?", "%"+rid+"%")
 	}
 	if q.RequestType != nil {
 		db = db.Where("request_type = ?", *q.RequestType)
@@ -2235,21 +2269,23 @@ func (r *GatewayUsageLogs) applyFilters(db *gorm.DB, q GatewayUsageQuery) *gorm.
 				GROUP BY request_id
 				HAVING (COUNT(*) > 1 OR MAX(attempt) > 1
 					OR SUM(CASE WHEN attempt_kind IN ('retry','failover') THEN 1 ELSE 0 END) > 0)
-					AND SUM(CASE WHEN success = 1 OR success = true THEN 1 ELSE 0 END) > 0
+					AND SUM(CASE WHEN success THEN 1 ELSE 0 END) > 0
 			)`, chainArgs...,
 		)
 	case "chain_direct", "chain_recovered", "chain_failed":
 		// 链级结局：先按 request_id 归组拿到「最后一次尝试」（id 单调递增，最大的那条
 		// 就是链尾，跟 DispatchFlow 里按 created_at ASC, id ASC 取最后一条同一个口径），
 		// 再按链尾的成败和链长筛。只命中链尾那一行，所以行数就是链数。
-		cond := "(f.success = 1 OR f.success = true)"
+		// 直接用布尔列做条件：SQLite/MySQL 存 0/1、PostgreSQL 是 boolean，
+		// 写成 = 1 在 PG 上会报 boolean = integer
+		cond := "f.success"
 		switch mode {
 		case "chain_direct":
 			cond = "c.attempts = 1 AND " + cond
 		case "chain_recovered":
 			cond = "c.attempts > 1 AND " + cond
 		case "chain_failed":
-			cond = "(f.success = 0 OR f.success = false)"
+			cond = "NOT f.success"
 		}
 		db = db.Where(`id IN (
 			SELECT c.last_id FROM (
@@ -2268,7 +2304,7 @@ func (r *GatewayUsageLogs) applyFilters(db *gorm.DB, q GatewayUsageQuery) *gorm.
 				GROUP BY request_id
 				HAVING (COUNT(*) > 1 OR MAX(attempt) > 1
 					OR SUM(CASE WHEN attempt_kind IN ('retry','failover') THEN 1 ELSE 0 END) > 0)
-					AND SUM(CASE WHEN success = 1 OR success = true THEN 1 ELSE 0 END) = 0
+					AND SUM(CASE WHEN success THEN 1 ELSE 0 END) = 0
 			)`, chainArgs...,
 		)
 	default:
@@ -2323,6 +2359,15 @@ func padTime(t *time.Time, d time.Duration) *time.Time {
 	}
 	v := t.Add(d)
 	return &v
+}
+
+// likeOp 不区分大小写的模糊匹配：SQLite / MySQL 默认排序规则下 LIKE 本就不分大小写，
+// PostgreSQL 的 LIKE 区分大小写，要用 ILIKE 才能保持各库搜索行为一致。
+func likeOp(db *gorm.DB) string {
+	if db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres" {
+		return "ILIKE"
+	}
+	return "LIKE"
 }
 
 func isSQLite(db *gorm.DB) bool {

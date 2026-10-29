@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -24,21 +23,11 @@ func (f *fakeGatewayResort) ResortRoutesOnRateScan(_ context.Context) {
 
 func openTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := storage.Open(storage.DBConfig{
-		Driver: storage.DBDriverSQLite,
-		Path:   filepath.Join(t.TempDir(), "scheduler-test.db"),
-	})
+	db, cleanup, err := storage.OpenTestDB(t.TempDir())
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	if err := storage.AutoMigrate(db); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("db handle: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
+	t.Cleanup(cleanup)
 	return db
 }
 

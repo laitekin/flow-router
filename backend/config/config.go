@@ -50,6 +50,10 @@ type DatabaseConfig struct {
 	Name         string `mapstructure:"name" yaml:"name" json:"name"`
 	MaxOpenConns int    `mapstructure:"maxOpenConns" yaml:"maxOpenConns" json:"maxOpenConns"`
 	MaxIdleConns int    `mapstructure:"maxIdleConns" yaml:"maxIdleConns" json:"maxIdleConns"`
+	// SSLMode 仅 PostgreSQL（disable / require / verify-full），默认 disable
+	SSLMode string `mapstructure:"sslMode" yaml:"sslMode" json:"sslMode"`
+	// URL 完整连接串（DATABASE_URL），非空时优先于 host/port/user 等分项
+	URL string `mapstructure:"url" yaml:"url" json:"url"`
 }
 
 func (d DatabaseConfig) ToStorageConfig() storage.DBConfig {
@@ -63,6 +67,8 @@ func (d DatabaseConfig) ToStorageConfig() storage.DBConfig {
 		Name:         d.Name,
 		MaxOpenConns: d.MaxOpenConns,
 		MaxIdleConns: d.MaxIdleConns,
+		SSLMode:      d.SSLMode,
+		DSN:          d.URL,
 	}
 }
 
@@ -369,6 +375,8 @@ func load(path string, withEnv bool) (*Config, string, error) {
 		_ = v.BindEnv("database.user", "DATABASE_USER")
 		_ = v.BindEnv("database.password", "DATABASE_PASSWORD")
 		_ = v.BindEnv("database.name", "DATABASE_NAME")
+		_ = v.BindEnv("database.sslMode", "DATABASE_SSLMODE")
+		_ = v.BindEnv("database.url", "DATABASE_URL")
 		_ = v.BindEnv("server.port", "SERVER_PORT")
 		_ = v.BindEnv("server.mode", "SERVER_MODE")
 		_ = v.BindEnv("log.level", "LOG_LEVEL")
@@ -450,7 +458,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.driver", "sqlite")
 	v.SetDefault("database.path", "./data/upstream-ops.db")
 	v.SetDefault("database.host", "localhost")
-	v.SetDefault("database.port", 3306)
+	// 0 = 按驱动取默认端口（mysql 3306 / postgres 5432）
+	v.SetDefault("database.port", 0)
 	v.SetDefault("database.name", "upstreamops")
 	v.SetDefault("database.maxOpenConns", 20)
 	v.SetDefault("database.maxIdleConns", 5)

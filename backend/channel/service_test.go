@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,21 +28,11 @@ func (f *fakeHTTPConfigConnector) SetHTTPConfig(cfg connector.HTTPConfig) {
 
 func testService(t *testing.T) (*Service, *crypto.Cipher) {
 	t.Helper()
-	db, err := storage.Open(storage.DBConfig{
-		Driver: storage.DBDriverSQLite,
-		Path:   filepath.Join(t.TempDir(), "test.db"),
-	})
+	db, cleanup, err := storage.OpenTestDB(t.TempDir())
 	if err != nil {
-		t.Fatalf("open db: %v", err)
+		t.Fatalf("open test db: %v", err)
 	}
-	if err := storage.AutoMigrate(db); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("get sql db: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
+	t.Cleanup(cleanup)
 
 	cipher, err := crypto.NewCipher("12345678901234567890123456789012")
 	if err != nil {
