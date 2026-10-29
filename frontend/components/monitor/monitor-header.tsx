@@ -112,11 +112,11 @@ export function MonitorHeader() {
   const isDark = mounted && theme === "dark"
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border bg-card/90 backdrop-blur-md">
+    <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
       <div className="mx-auto flex h-12 max-w-[120rem] items-center justify-between gap-2 px-3 sm:h-14 sm:gap-4 sm:px-6 lg:px-8">
         {/* left: logo + title */}
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-2.5">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm shadow-primary/30 sm:size-8">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-foreground text-background sm:size-8">
             <Activity className="size-3.5 sm:size-4" strokeWidth={2.5} />
           </div>
           <div className="min-w-0">
