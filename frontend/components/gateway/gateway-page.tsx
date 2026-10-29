@@ -61,6 +61,11 @@ import { PricesPanel } from "./prices-panel"
 import { PromptInjectionPanel } from "./prompt-injection-panel"
 import { ServiceTierPolicyPanel } from "./service-tier-policy-panel"
 import {
+  DEFAULT_USAGE_RANGE,
+  usageRangeFor,
+  type UsageRangePreset,
+} from "./usage-time"
+import {
   CreatedSecretDialog,
   DefaultsPriceDialog,
   EnsureKeysResultDialog,
@@ -158,8 +163,15 @@ export function GatewayPage() {
   const [usageRequestIDFilter, setUsageRequestIDFilter] = useState("")
   /** all | success | client | fail | multi | multi_success | multi_fail | chain_direct | chain_recovered | chain_failed */
   const [usageSuccessFilter, setUsageSuccessFilter] = useState<string>("all")
-  const [usageFrom, setUsageFrom] = useState("")
-  const [usageTo, setUsageTo] = useState("")
+  // 默认只查今天：不带时间范围的全量统计在大表上必然慢
+  const [usageFrom, setUsageFrom] = useState(
+    () => usageRangeFor(DEFAULT_USAGE_RANGE).from,
+  )
+  const [usageTo, setUsageTo] = useState(() => usageRangeFor(DEFAULT_USAGE_RANGE).to)
+  /** 当前选中的快捷时间范围；手动改时间后为空 */
+  const [usageRange, setUsageRange] = useState<UsageRangePreset | "">(
+    DEFAULT_USAGE_RANGE,
+  )
   const [usagePage, setUsagePage] = useState(1)
   const [usagePageSize, setUsagePageSize] = useState(50)
   const [usageLoading, setUsageLoading] = useState(false)
@@ -455,6 +467,8 @@ export function GatewayPage() {
       to?: string
       page?: number
       pageSize?: number
+      /** 是否同时重拉模型下拉；默认仅新查询（第 1 页）时拉，翻页不拉 */
+      withModels?: boolean
     }) => {
       const seq = ++usageSeqRef.current
       setUsageLoading(true)
@@ -491,6 +505,16 @@ export function GatewayPage() {
           const iso = usageTimeToRFC3339(opts.to)
           if (iso) qs.set("to", iso)
         }
+        if (opts?.withModels ?? pageNum === 1) {
+          // 模型下拉随组 / 密钥 / 时间范围聚合；只在真正查询时拉，
+          // 不再跟着时间输入框逐字触发
+          void loadUsageModels({
+            groupID: opts?.groupID,
+            keyID: opts?.keyID,
+            from: opts?.from,
+            to: opts?.to,
+          })
+        }
         const [page, stats] = await Promise.all([
           apiFetch<GatewayUsagePage>(`/gateway/usage?${qs}`),
           apiFetch<GatewayUsageStats>(`/gateway/usage/stats?${qs}`),
@@ -507,7 +531,7 @@ export function GatewayPage() {
         if (seq === usageSeqRef.current) setUsageLoading(false)
       }
     },
-    [usageTimeToRFC3339],
+    [loadUsageModels, usageTimeToRFC3339],
   )
 
   const loadPrices = useCallback(async () => {
@@ -537,24 +561,11 @@ export function GatewayPage() {
     // 使用记录默认加载全部网关组，与左侧选中组无关。
     // 但带着深链接进来时要跳过：这个 effect 的依赖是几个 useCallback，identity 一变就重跑，
     // 每重跑一次就会用「全部/不筛选」把深链接刚拉到的结果盖掉（实测能盖 5 次以上）。
-    if (!usageDeepLink) void loadUsage({ groupID: "all", page: 1, pageSize: 50 })
+    if (!usageDeepLink) {
+      const range = usageRangeFor(DEFAULT_USAGE_RANGE)
+      void loadUsage({ groupID: "all", ...range, page: 1, pageSize: 50 })
+    }
   }, [loadGroups, loadPrices, loadProviderOptions, loadUsage, usageDeepLink])
-
-  // 模型下拉随组 / 密钥 / 时间范围变化重新聚合（不含模型自身筛选）
-  useEffect(() => {
-    void loadUsageModels({
-      groupID: usageGroupFilter,
-      keyID: usageKeyFilter,
-      from: usageFrom,
-      to: usageTo,
-    })
-  }, [
-    usageGroupFilter,
-    usageKeyFilter,
-    usageFrom,
-    usageTo,
-    loadUsageModels,
-  ])
 
   const usageQueryOpts = useCallback(
     (page = usagePage, pageSize = usagePageSize) => ({
@@ -637,18 +648,12 @@ export function GatewayPage() {
   const refreshUsage = useCallback(
     (page = usagePage) => {
       const opts = usageQueryOpts(page)
-      void loadUsage(opts)
       // 刷新时同步重拉模型聚合下拉（随当前组/密钥/时间）
-      void loadUsageModels({
-        groupID: opts.groupID,
-        keyID: opts.keyID,
-        from: opts.from,
-        to: opts.to,
-      })
+      void loadUsage({ ...opts, withModels: true })
       // 刷新时重拉密钥列表（按当前组过滤）
       void refreshUsageKeys(String(opts.groupID ?? "all"))
     },
-    [loadUsage, loadUsageModels, refreshUsageKeys, usagePage, usageQueryOpts],
+    [loadUsage, refreshUsageKeys, usagePage, usageQueryOpts],
   )
 
   /** 顶部刷新：组列表 + 当前组密钥/路由/配置 + 直连选项 + 价格 + 使用记录 */
@@ -687,13 +692,7 @@ export function GatewayPage() {
       }
 
       const opts = usageQueryOpts(usagePage, usagePageSize)
-      void loadUsage(opts)
-      void loadUsageModels({
-        groupID: opts.groupID,
-        keyID: opts.keyID,
-        from: opts.from,
-        to: opts.to,
-      })
+      void loadUsage({ ...opts, withModels: true })
       void refreshUsageKeys(String(opts.groupID ?? "all"), items)
 
       toast.success("已刷新")
@@ -707,7 +706,6 @@ export function GatewayPage() {
     loadPrices,
     loadProviderOptions,
     loadUsage,
-    loadUsageModels,
     refreshUsageKeys,
     reloadGroupDetail,
     selectedGroupID,
@@ -741,6 +739,7 @@ export function GatewayPage() {
     setUsageSuccessFilter(usageDeepLink.result)
     setUsageFrom(usageDeepLink.from)
     setUsageTo(usageDeepLink.to)
+    setUsageRange("")
     // 其余筛选清回默认，否则深链接会跟上一次遗留的密钥/模型筛选叠在一起
     setUsageKeyFilter("all")
     setUsageModelFilter("all")
@@ -1874,6 +1873,8 @@ export function GatewayPage() {
             setUsageFrom={setUsageFrom}
             usageTo={usageTo}
             setUsageTo={setUsageTo}
+            usageRange={usageRange}
+            setUsageRange={setUsageRange}
             setUsagePage={setUsagePage}
             usagePageSize={usagePageSize}
             setUsagePageSize={setUsagePageSize}

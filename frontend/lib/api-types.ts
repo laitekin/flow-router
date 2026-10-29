@@ -857,6 +857,8 @@ export interface GatewayUsageLog {
   channel_name?: string
   source_group_name?: string
   source_api_key_name?: string
+  /** 列表省略了上游错误 body / header 等大字段时，标记还有可展开的详情（按 id 补拉） */
+  has_error_payload?: boolean
 }
 
 export interface GatewayUsagePage {
