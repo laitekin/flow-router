@@ -1831,3 +1831,73 @@ func TestGatewayUsageFiltersAreCaseInsensitive(t *testing.T) {
 		t.Fatalf("provider search should be case-insensitive: %v %d", err, len(opts))
 	}
 }
+
+func TestCopyAllPreservesDataAndSequences(t *testing.T) {
+	src, err := Open(DBConfig{Driver: DBDriverSQLite, Path: t.TempDir() + "/src.db"})
+	if err != nil {
+		t.Fatalf("open src: %v", err)
+	}
+	if err := AutoMigrate(src); err != nil {
+		t.Fatalf("migrate src: %v", err)
+	}
+	t.Cleanup(closeDB(src))
+	// Enabled=false 是 default:true 字段的零值，最容易在迁移中被默认值吞掉
+	if err := src.Create(&GatewayProvider{ID: 7, Name: "off", BaseURL: "https://x", Enabled: true}).Error; err != nil {
+		t.Fatalf("seed provider: %v", err)
+	}
+	if err := src.Model(&GatewayProvider{}).Where("id = ?", 7).Update("enabled", false).Error; err != nil {
+		t.Fatalf("disable provider: %v", err)
+	}
+	usage := NewGatewayUsageLogs(src)
+	when := time.Date(2026, 5, 1, 12, 30, 0, 0, time.UTC)
+	for i := 0; i < 1203; i++ {
+		if err := usage.Create(&GatewayUsageLog{RequestID: fmt.Sprintf("r%d", i), RequestedModel: "m", Success: i%3 != 0, CreatedAt: when.Add(time.Duration(i) * time.Second)}); err != nil {
+			t.Fatalf("seed usage: %v", err)
+		}
+	}
+	if err := src.Create(&NotificationCooldown{ChannelID: 3, Event: EventBalanceLow, LastSentAt: when}).Error; err != nil {
+		t.Fatalf("seed cooldown: %v", err)
+	}
+
+	dst := openTestDB(t)
+	results, err := CopyAll(src, dst, CopyOptions{BatchSize: 500})
+	if err != nil {
+		t.Fatalf("copy: %v", err)
+	}
+	copied := map[string]int64{}
+	for _, r := range results {
+		copied[r.Table] = r.Rows
+	}
+	if copied["gateway_usage_logs"] != 1203 || copied["gateway_providers"] != 1 || copied["notification_cooldowns"] != 1 {
+		t.Fatalf("unexpected copy counts: %+v", copied)
+	}
+
+	var p GatewayProvider
+	if err := dst.First(&p, 7).Error; err != nil {
+		t.Fatalf("load provider: %v", err)
+	}
+	if p.Enabled {
+		t.Fatalf("Enabled=false must survive the copy")
+	}
+	var failed int64
+	dst.Model(&GatewayUsageLog{}).Where("success = ?", false).Count(&failed)
+	if failed != 401 {
+		t.Fatalf("failed rows = %d, want 401", failed)
+	}
+	var first GatewayUsageLog
+	if err := dst.Order("id ASC").First(&first).Error; err != nil || !first.CreatedAt.Equal(when) {
+		t.Fatalf("timestamp not preserved: %v %v", first.CreatedAt, err)
+	}
+	// 序列必须推进到 MAX(id) 之后，否则新插入会撞主键
+	next := GatewayUsageLog{RequestID: "after-copy", RequestedModel: "m", CreatedAt: time.Now()}
+	if err := NewGatewayUsageLogs(dst).Create(&next); err != nil {
+		t.Fatalf("insert after copy: %v", err)
+	}
+	if next.ID != 1204 {
+		t.Fatalf("next id = %d, want 1204", next.ID)
+	}
+
+	if _, err := CopyAll(src, dst, CopyOptions{}); err == nil {
+		t.Fatalf("copy into non-empty target must be refused")
+	}
+}

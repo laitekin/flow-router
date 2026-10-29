@@ -177,16 +177,9 @@ func Open(cfg DBConfig) (*gorm.DB, error) {
 	return db, nil
 }
 
-// AutoMigrate 启动时自动同步表结构。
-func AutoMigrate(db *gorm.DB) error {
-	if err := dropDeletedAtColumns(db); err != nil {
-		return err
-	}
-	if err := dropObsoleteRateSiteColumns(db); err != nil {
-		return err
-	}
-	// 仅 AutoMigrate 当前模型（网关未发布，不做「密钥→组」等历史数据迁移）
-	if err := db.AutoMigrate(
+// AllModels 全部持久化模型（AutoMigrate 与跨库数据迁移共用同一份清单）。
+func AllModels() []any {
+	return []any{
 		&Channel{},
 		&AuthSession{},
 		&CaptchaConfig{},
@@ -205,7 +198,19 @@ func AutoMigrate(db *gorm.DB) error {
 		&GatewayProvider{},
 		&GatewayUsageLog{},
 		&ModelPriceOverride{},
-	); err != nil {
+	}
+}
+
+// AutoMigrate 启动时自动同步表结构。
+func AutoMigrate(db *gorm.DB) error {
+	if err := dropDeletedAtColumns(db); err != nil {
+		return err
+	}
+	if err := dropObsoleteRateSiteColumns(db); err != nil {
+		return err
+	}
+	// 仅 AutoMigrate 当前模型（网关未发布，不做「密钥→组」等历史数据迁移）
+	if err := db.AutoMigrate(AllModels()...); err != nil {
 		return err
 	}
 	return ensureGatewayUsageIndexes(db)

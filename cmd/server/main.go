@@ -33,6 +33,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "migrate-db" {
+		os.Exit(runMigrateDB(os.Args[2:]))
+	}
 	configPath := flag.String("config", "", "path to config.yaml (optional; env vars also supported)")
 	flag.Parse()
 
