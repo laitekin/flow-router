@@ -91,8 +91,13 @@
 }
 
 @theme inline {
-  --font-sans: 'Geist', 'Geist Fallback';
-  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  /* @fontsource-variable 注册的族名带 Variable 后缀；之前写成 'Geist' 实际从未生效，
+     且没有通用兜底，中文落到浏览器默认的衬线字体（Windows 上是宋体）。 */
+  --font-sans: 'Geist Variable', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Source Han Sans SC',
+    'WenQuanYi Micro Hei', sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'PingFang SC', 'Microsoft YaHei', monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -144,6 +149,6 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background font-sans text-foreground antialiased;
   }
 }

@@ -2,8 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import {
+  Check,
+  Copy,
   DollarSign,
   Gauge,
+  Link2,
   Layers,
   Loader2,
   Pencil,
@@ -18,6 +21,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { copyText } from "@/lib/clipboard"
 import { useConfirm } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api"
 import { useChannels } from "@/lib/queries"
@@ -40,6 +45,7 @@ import type {
   GatewayUsageModelOption,
   GatewayUsagePage,
   GatewayUsageStats,
+  GatewayUsageSummary,
   ModelDefaultPrice,
   ModelPriceOverride,
   RateSnapshot,
@@ -51,6 +57,7 @@ import {
 } from "./model-mapping-editor"
 import { GatewayProvidersPanel } from "./gateway-providers-panel"
 import { GroupsSidebar } from "./groups-sidebar"
+import { StatTiles } from "./usage-stat"
 import { KeysPanel } from "./keys-panel"
 import { RoutesPanel } from "./routes-panel"
 import { SchedulerWorkbench } from "./scheduler-workbench"
@@ -135,6 +142,8 @@ export function GatewayPage() {
 
   const [routeDrafts, setRouteDrafts] = useState<Partial<GatewayRoute>[]>([])
   const [providerOptions, setProviderOptions] = useState<GatewayProviderOption[]>([])
+  /** 近 24h 各组 / 密钥 / 路由 / 直连渠道用量，供列表展示 */
+  const [usageSummary, setUsageSummary] = useState<GatewayUsageSummary | null>(null)
   const [sourceGroupsByChannel, setSourceGroupsByChannel] = useState<
     Record<number, RateSnapshot[]>
   >({})
@@ -554,6 +563,23 @@ export function GatewayPage() {
     }
   }, [])
 
+  const loadUsageSummary = useCallback(async () => {
+    try {
+      setUsageSummary(await apiFetch<GatewayUsageSummary>("/gateway/stats/summary?window=24h"))
+    } catch {
+      /* 统计失败不影响配置操作 */
+    }
+  }, [])
+
+  // 列表里的 24h 用量每分钟自动更新一次（后端有 10s 结果缓存）
+  useEffect(() => {
+    void loadUsageSummary()
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void loadUsageSummary()
+    }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [loadUsageSummary])
+
   useEffect(() => {
     void loadGroups()
     void loadPrices()
@@ -664,6 +690,7 @@ export function GatewayPage() {
         fetchGroups(),
         loadProviderOptions(),
         loadPrices(),
+        loadUsageSummary(),
       ])
       setGroups(items)
 
@@ -706,6 +733,7 @@ export function GatewayPage() {
     loadPrices,
     loadProviderOptions,
     loadUsage,
+    loadUsageSummary,
     refreshUsageKeys,
     reloadGroupDetail,
     selectedGroupID,
@@ -1585,42 +1613,19 @@ export function GatewayPage() {
     <section className="space-y-4">
       {confirmDialog}
 
-      <header className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-lg font-semibold text-foreground">请求网关</h1>
-            <Badge
-              variant="outline"
-              className="border-border bg-muted/40 text-muted-foreground"
-            >
-              组 · 密钥 · 路由
-            </Badge>
-          </div>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold tracking-tight text-foreground">请求网关</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            按网关组配置密钥、路由与模型映射，统计为近 24 小时。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <AccessInfoButton />
           <Button variant="outline" size="sm" onClick={() => void refreshAll()} disabled={loading}>
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
             刷新
           </Button>
-        </div>
-        <div className="max-w-3xl space-y-1.5 text-sm leading-6 text-muted-foreground">
-          <p>
-            按网关组配置密钥、路由与模型映射，并查看用量。
-          </p>
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <span className="shrink-0">兼容接口</span>
-            {[
-              "/v1/chat/completions",
-              "/v1/responses",
-              "/v1/messages",
-              "/v1/models",
-            ].map((path) => (
-              <code
-                key={path}
-                className="max-w-full break-all rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] leading-relaxed text-foreground/80"
-              >
-                {path}
-              </code>
-            ))}
-          </div>
         </div>
       </header>
 
@@ -1629,22 +1634,25 @@ export function GatewayPage() {
         onValueChange={(v) => setMainTab(v as MainTab)}
         className="space-y-4"
       >
-        <TabsList className="h-auto w-full justify-start rounded-2xl border border-border bg-muted/40 p-1">
-          <TabsTrigger value="gateway" className="gap-1.5 px-4 py-2">
-            <Layers className="size-3.5" /> 网关
+        <TabsList className={MAIN_TABS_LIST}>
+          <TabsTrigger value="gateway" className={MAIN_TAB}>
+            <Layers className="size-3.5" /> 网关组
+            <TabCount n={groups.length} />
           </TabsTrigger>
           <TabsTrigger
             value="providers"
-            className="gap-1.5 px-4 py-2"
+            className={MAIN_TAB}
             onClick={() => void loadProviderOptions()}
           >
             <Route className="size-3.5" /> 直连渠道
+            <TabCount n={providerOptions.length} />
           </TabsTrigger>
-          <TabsTrigger value="usage" className="gap-1.5 px-4 py-2">
+          <TabsTrigger value="usage" className={MAIN_TAB}>
             <ScrollText className="size-3.5" /> 使用记录
           </TabsTrigger>
-          <TabsTrigger value="prices" className="gap-1.5 px-4 py-2">
+          <TabsTrigger value="prices" className={MAIN_TAB}>
             <DollarSign className="size-3.5" /> 价格覆盖
+            <TabCount n={prices.length} />
           </TabsTrigger>
         </TabsList>
 
@@ -1661,6 +1669,7 @@ export function GatewayPage() {
               onEdit={openEditGroup}
               onDelete={(id) => void deleteGroup(id)}
               onReorder={(ids) => void reorderGroups(ids)}
+              stats={usageSummary?.groups}
             />
 
             <div className="min-w-0">
@@ -1702,11 +1711,18 @@ export function GatewayPage() {
                           </Badge>
                         )}
                       </div>
-                      {selectedGroup.description ? (
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {selectedGroup.description}
-                        </p>
-                      ) : null}
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {[
+                          selectedGroup.description?.trim(),
+                          `${keys.length} 个密钥`,
+                          `${routeDrafts.filter((r) => r.enabled !== false).length}/${routeDrafts.length} 条路由启用`,
+                          selectedGroup.failover_enabled === false
+                            ? "顺延关闭"
+                            : `最多顺延 ${selectedGroup.failover_max ?? 8} 次`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
                     </div>
                     <Button
                       size="sm"
@@ -1718,6 +1734,8 @@ export function GatewayPage() {
                     </Button>
                   </div>
 
+                  <StatTiles stat={usageSummary?.groups?.[String(selectedGroup.id)]} />
+
                   <Tabs
                     value={configTab}
                     onValueChange={(v) => setConfigTab(v as ConfigTab)}
@@ -1728,23 +1746,23 @@ export function GatewayPage() {
                         : "translate-y-0 animate-in fade-in-0 duration-200",
                     )}
                   >
-                    <TabsList className="h-auto w-full justify-start rounded-lg border border-border bg-muted/30 p-1">
-                      <TabsTrigger value="keys" className="flex-none gap-1.5 px-3 py-1.5">
+                    <TabsList className={SUB_TABS_LIST}>
+                      <TabsTrigger value="keys" className={SUB_TAB}>
                         <KeyRound className="size-3.5" /> 密钥
                       </TabsTrigger>
-                      <TabsTrigger value="routes" className="flex-none gap-1.5 px-3 py-1.5">
+                      <TabsTrigger value="routes" className={SUB_TAB}>
                         <Route className="size-3.5" /> 渠道路由
                       </TabsTrigger>
-                      <TabsTrigger value="scheduler" className="flex-none gap-1.5 px-3 py-1.5">
+                      <TabsTrigger value="scheduler" className={SUB_TAB}>
                         <Gauge className="size-3.5" /> 调度
                       </TabsTrigger>
-                      <TabsTrigger value="models" className="flex-none gap-1.5 px-3 py-1.5">
+                      <TabsTrigger value="models" className={SUB_TAB}>
                         <Layers className="size-3.5" /> 模型映射
                       </TabsTrigger>
-                      <TabsTrigger value="service-tier" className="flex-none gap-1.5 px-3 py-1.5">
+                      <TabsTrigger value="service-tier" className={SUB_TAB}>
                         <SlidersHorizontal className="size-3.5" /> 请求策略
                       </TabsTrigger>
-                      <TabsTrigger value="prompt" className="flex-none gap-1.5 px-3 py-1.5">
+                      <TabsTrigger value="prompt" className={SUB_TAB}>
                         <MessageSquareText className="size-3.5" /> 提示词注入
                       </TabsTrigger>
                     </TabsList>
@@ -1760,6 +1778,7 @@ export function GatewayPage() {
                         onEdit={openEditKey}
                         onToggle={(k) => void toggleKey(k)}
                         onDelete={(id) => void deleteKey(id)}
+                        stats={usageSummary?.keys}
                       />
                     </TabsContent>
 
@@ -1783,6 +1802,7 @@ export function GatewayPage() {
                         onClearRoutePause={(id) => void clearRoutePause(id)}
                         onShowPauseError={setPauseErrorRoute}
                         highlightedRouteID={highlightedRouteID}
+                        stats={usageSummary?.routes}
                       />
                     </TabsContent>
 
@@ -1848,7 +1868,7 @@ export function GatewayPage() {
         </TabsContent>
 
         <TabsContent value="providers" className="mt-0">
-          <GatewayProvidersPanel />
+          <GatewayProvidersPanel stats={usageSummary?.providers} />
         </TabsContent>
 
         <TabsContent value="usage" className="mt-0 space-y-4">
@@ -1992,5 +2012,87 @@ export function GatewayPage() {
         onClose={() => setCreatedSecret(null)}
       />
     </section>
+  )
+}
+
+// 主标签：下划线样式，左对齐，不再撑满整行
+const MAIN_TABS_LIST =
+  "h-auto w-full justify-start gap-1 overflow-x-auto rounded-none border-b border-border bg-transparent p-0"
+const MAIN_TAB =
+  "relative h-9 flex-none gap-1.5 rounded-none border-0 bg-transparent px-3 text-muted-foreground shadow-none " +
+  "after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-full after:bg-transparent " +
+  "hover:text-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground " +
+  "data-[state=active]:shadow-none data-[state=active]:after:bg-foreground dark:data-[state=active]:bg-transparent " +
+  "dark:data-[state=active]:border-transparent"
+// 组内子标签：紧凑分段按钮
+const SUB_TABS_LIST = "h-auto w-fit max-w-full flex-wrap justify-start rounded-lg bg-muted/60 p-0.5"
+const SUB_TAB = "h-7 flex-none gap-1.5 px-2.5 text-xs"
+
+function TabCount({ n }: { n: number }) {
+  if (!n) return null
+  return (
+    <span className="rounded-full bg-muted px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+      {n}
+    </span>
+  )
+}
+
+const COMPAT_ENDPOINTS = [
+  { path: "/v1/chat/completions", label: "OpenAI Chat" },
+  { path: "/v1/responses", label: "OpenAI Responses" },
+  { path: "/v1/messages", label: "Anthropic Messages" },
+  { path: "/v1/models", label: "模型列表" },
+]
+
+/** 接入信息：Base URL 与兼容接口，一键复制（原来平铺在页头占两行） */
+function AccessInfoButton() {
+  const [copied, setCopied] = useState<string | null>(null)
+  const base = typeof window === "undefined" ? "" : window.location.origin
+  const copy = (text: string) => {
+    void copyText(text)
+      .then(() => {
+        setCopied(text)
+        window.setTimeout(() => setCopied((c) => (c === text ? null : c)), 1500)
+      })
+      .catch(() => toast.error("复制失败"))
+  }
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Link2 className="size-3.5" />
+          接入信息
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-96 space-y-3 p-3">
+        <div>
+          <div className="text-xs font-medium">Base URL</div>
+          <p className="text-[11px] text-muted-foreground">客户端填这个地址 + 组内密钥即可</p>
+        </div>
+        {[base + "/v1", ...COMPAT_ENDPOINTS.map((e) => base + e.path)].map((url, i) => (
+          <button
+            key={url}
+            type="button"
+            onClick={() => copy(url)}
+            className={cn(
+              "flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors hover:bg-muted",
+              i === 0 && "border-primary/40 bg-primary/5",
+            )}
+          >
+            <span className="min-w-0">
+              <span className="block truncate font-mono text-xs">{url}</span>
+              {i > 0 ? (
+                <span className="text-[10px] text-muted-foreground">{COMPAT_ENDPOINTS[i - 1].label}</span>
+              ) : null}
+            </span>
+            {copied === url ? (
+              <Check className="size-3.5 shrink-0 text-emerald-600" />
+            ) : (
+              <Copy className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
   )
 }

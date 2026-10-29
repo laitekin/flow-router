@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { NavLink, useNavigate } from "react-router-dom"
 import { useTheme } from "next-themes"
 import {
   Activity,
@@ -35,6 +35,12 @@ import { useAppVersion, useChannels } from "@/lib/queries"
 import type { AppVersion } from "@/lib/api-types"
 import { relativeTime } from "@/lib/format"
 import { toast } from "sonner"
+
+const NAV_ITEMS = [
+  { to: "/", label: "概览", icon: Home },
+  { to: "/gateway", label: "请求网关", icon: Network },
+  { to: "/settings", label: "系统设置", icon: Settings },
+] as const
 
 export function MonitorHeader() {
   const navigate = useNavigate()
@@ -141,10 +147,32 @@ export function MonitorHeader() {
               </p>
             ) : null}
           </div>
+
+          {/* desktop: 带文字的主导航，当前页高亮（原来只有三个无标签图标，看不出在哪一页） */}
+          <nav className="ml-4 hidden items-center gap-0.5 sm:flex lg:ml-8" aria-label="主导航">
+            {NAV_ITEMS.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === "/"}
+                className={({ isActive }) =>
+                  cn(
+                    "relative inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm transition-colors",
+                    isActive
+                      ? "bg-muted font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                  )
+                }
+              >
+                <item.icon className="size-3.5" />
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
         </div>
 
         {/* right: actions */}
-        <div className="flex shrink-0 items-center gap-1 sm:gap-3">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           {/* desktop: last collected + refresh */}
           <div className="hidden items-center gap-2 sm:flex">
             <span className="text-xs text-muted-foreground">
@@ -243,65 +271,14 @@ export function MonitorHeader() {
           </DropdownMenu>
 
           {/* desktop: full action row */}
-          <div className="hidden items-center gap-1.5 sm:flex sm:gap-3">
-            <Tooltip delayDuration={200}>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => navigate("/")}
-                  className="size-8 border-border bg-background text-foreground hover:bg-muted"
-                  aria-label="主页"
-                >
-                  <Home className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                {"主页"}
-              </TooltipContent>
-            </Tooltip>
-
-            <Tooltip delayDuration={200}>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => navigate("/gateway")}
-                  className="size-8 border-border bg-background text-foreground hover:bg-muted"
-                  aria-label="请求网关"
-                >
-                  <Network className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                {"请求网关"}
-              </TooltipContent>
-            </Tooltip>
-
-            <Tooltip delayDuration={200}>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => navigate("/settings")}
-                  className="size-8 border-border bg-background text-foreground hover:bg-muted"
-                  aria-label="系统设置"
-                >
-                  <Settings className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                {"系统设置"}
-              </TooltipContent>
-            </Tooltip>
-
+          <div className="hidden items-center gap-1 sm:flex">
             <Tooltip delayDuration={200}>
               <TooltipTrigger asChild>
                 <Button
                   asChild
-                  variant="outline"
+                  variant="ghost"
                   size="icon"
-                  className="size-8 border-border bg-background text-foreground hover:bg-muted"
+                  className="size-8 text-muted-foreground hover:text-foreground"
                   aria-label="GitHub 仓库"
                 >
                   <a
@@ -321,10 +298,10 @@ export function MonitorHeader() {
             <Tooltip delayDuration={200}>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="icon"
                   onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                  className="size-8 border-border bg-background text-foreground hover:bg-muted"
+                  className="size-8 text-muted-foreground hover:text-foreground"
                   aria-label="切换主题"
                 >
                   {isDark ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
@@ -339,10 +316,10 @@ export function MonitorHeader() {
               <Tooltip delayDuration={200}>
                 <TooltipTrigger asChild>
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon"
                     onClick={logout}
-                    className="size-8 border-border bg-background text-foreground hover:bg-muted"
+                    className="size-8 text-muted-foreground hover:text-foreground"
                     aria-label="退出登录"
                   >
                     <LogOut className="size-3.5" />
