@@ -1945,3 +1945,49 @@ func TestOnGatewayAuthChange(t *testing.T) {
 		t.Fatalf("delete must bump (and usage insert must not), got %d", bumps)
 	}
 }
+
+func TestGatewayUsageSummary(t *testing.T) {
+	db := openTestDB(t)
+	usage := NewGatewayUsageLogs(db)
+	now := time.Now()
+	ft := int64(1000)
+	rows := []GatewayUsageLog{
+		// 请求 a：路由 1 失败后顺延到路由 2 成功 —— 对密钥算 1 次成功请求，对路由各算 1 次尝试
+		{GatewayGroupID: 1, GatewayKeyID: 1, RouteID: 1, GatewayProviderID: 7, RequestID: "a", Success: false, DurationMS: 100, CreatedAt: now.Add(-3 * time.Minute)},
+		{GatewayGroupID: 1, GatewayKeyID: 1, RouteID: 2, RequestID: "a", Attempt: 2, Success: true, ActualCost: 0.5, InputTokens: 10, OutputTokens: 20, DurationMS: 300, FirstTokenMS: &ft, CreatedAt: now.Add(-2 * time.Minute)},
+		{GatewayGroupID: 1, GatewayKeyID: 2, RouteID: 2, RequestID: "b", Success: false, DurationMS: 200, CreatedAt: now.Add(-time.Minute)},
+		// 时间窗外
+		{GatewayGroupID: 1, GatewayKeyID: 1, RouteID: 1, RequestID: "old", Success: true, ActualCost: 9, CreatedAt: now.Add(-48 * time.Hour)},
+	}
+	for i := range rows {
+		rows[i].RequestedModel = "m"
+		if err := usage.Create(&rows[i]); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+	sum, err := usage.Summary(now.Add(-24*time.Hour), now)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	k1 := sum.Keys[1]
+	if k1 == nil || k1.Requests != 1 || k1.Success != 1 || k1.Cost != 0.5 || k1.Tokens != 30 {
+		t.Fatalf("key 1 = %+v", k1)
+	}
+	// PG 存微秒精度，比较时容忍亚毫秒差异
+	if k1.LastAt == nil || k1.LastAt.Sub(rows[1].CreatedAt).Abs() > time.Millisecond {
+		t.Fatalf("key 1 last_at = %v, want %v", k1.LastAt, rows[1].CreatedAt)
+	}
+	g := sum.Groups[1]
+	if g.Requests != 2 || g.Success != 1 || g.AvgDurationMS != 200 || g.AvgFirstTokenMS == nil || *g.AvgFirstTokenMS != 1000 {
+		t.Fatalf("group = %+v", g)
+	}
+	if r1 := sum.Routes[1]; r1.Requests != 1 || r1.Success != 0 {
+		t.Fatalf("route 1 = %+v", r1)
+	}
+	if r2 := sum.Routes[2]; r2.Requests != 2 || r2.Success != 1 {
+		t.Fatalf("route 2 = %+v", r2)
+	}
+	if p := sum.Providers[7]; p == nil || p.Requests != 1 {
+		t.Fatalf("provider 7 = %+v", p)
+	}
+}

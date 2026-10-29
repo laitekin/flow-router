@@ -68,6 +68,7 @@ func registerGatewayAdmin(g *gin.RouterGroup, d *Deps) {
 		gp.GET("/dispatch/trends", cachedGET(d, statsCacheTTL, func(c *gin.Context) { trendsGatewayDispatch(c, d) }))
 		gp.GET("/dispatch/errors", cachedGET(d, statsCacheTTL, func(c *gin.Context) { errorsGatewayDispatch(c, d) }))
 		gp.GET("/dispatch/flow", cachedGET(d, statsCacheTTL, func(c *gin.Context) { flowGatewayDispatch(c, d) }))
+		gp.GET("/stats/summary", cachedGET(d, statsCacheTTL, func(c *gin.Context) { summaryGatewayUsage(c, d) }))
 		gp.GET("/usage", func(c *gin.Context) { listGatewayUsage(c, d) })
 		gp.GET("/usage/stats", cachedGET(d, statsCacheTTL, func(c *gin.Context) { statsGatewayUsage(c, d) }))
 		gp.GET("/usage/models", cachedGET(d, statsCacheTTL, func(c *gin.Context) { listGatewayUsageModels(c, d) }))
@@ -761,6 +762,28 @@ func listGatewayUsage(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(http.StatusOK, page)
+}
+
+// summaryGatewayUsage 网关组 / 密钥 / 路由 / 直连渠道在时间窗内的用量汇总，供管理端列表展示。
+// window: 1h | 24h（默认）| 7d
+func summaryGatewayUsage(c *gin.Context, d *Deps) {
+	if d.GatewayUsage == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage storage unavailable"})
+		return
+	}
+	windows := map[string]time.Duration{"1h": time.Hour, "24h": 24 * time.Hour, "7d": 7 * 24 * time.Hour}
+	win, ok := windows[c.DefaultQuery("window", "24h")]
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "window must be one of 1h, 24h, 7d"})
+		return
+	}
+	to := time.Now()
+	sum, err := d.GatewayUsage.Summary(to.Add(-win), to)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, sum)
 }
 
 func statsGatewayUsage(c *gin.Context, d *Deps) {
