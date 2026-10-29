@@ -2022,7 +2022,7 @@ const MAIN_TAB =
   "relative h-9 flex-none gap-1.5 rounded-none border-0 bg-transparent px-3 text-muted-foreground shadow-none " +
   "after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-full after:bg-transparent " +
   "hover:text-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground " +
-  "data-[state=active]:shadow-none data-[state=active]:after:bg-foreground dark:data-[state=active]:bg-transparent " +
+  "data-[state=active]:shadow-none data-[state=active]:after:bg-primary dark:data-[state=active]:bg-transparent " +
   "dark:data-[state=active]:border-transparent"
 // 组内子标签：紧凑分段按钮
 const SUB_TABS_LIST = "h-auto w-fit max-w-full flex-wrap justify-start rounded-lg bg-muted/60 p-0.5"

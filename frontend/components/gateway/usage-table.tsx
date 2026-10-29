@@ -8,6 +8,8 @@ import {
   Copy,
   Info,
   Loader2,
+  Rows3,
+  Table as TableIcon,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -1615,6 +1617,444 @@ function UsageDetailSheet({
   )
 }
 
+/* ───────────── 详细视图：每条请求一张卡片，全部字段直接可见（不藏进 tooltip / 抽屉） ───────────── */
+
+/** 左侧状态色条：成功 / 失败 / 客户端断开 / 经过重试顺延 */
+function stripeClass(u: GatewayUsageLog, hasChain: boolean) {
+  if (isClientDisconnectResult(u)) return "border-l-warning"
+  if (!u.success) return "border-l-danger"
+  if (hasChain) return "border-l-violet-500"
+  return "border-l-success"
+}
+
+function KV({
+  label,
+  children,
+  mono,
+  muted,
+}: {
+  label: string
+  children: React.ReactNode
+  mono?: boolean
+  muted?: boolean
+}) {
+  return (
+    <>
+      <dt className="whitespace-nowrap text-muted-foreground">{label}</dt>
+      <dd
+        className={cn(
+          "min-w-0 break-words tabular-nums",
+          mono && "font-mono text-[11px] [overflow-wrap:anywhere]",
+          muted ? "text-muted-foreground" : "text-foreground",
+        )}
+      >
+        {children}
+      </dd>
+    </>
+  )
+}
+
+function DetailBlock({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
+  return (
+    <section className={cn("min-w-0 space-y-2", className)}>
+      <h4 className="text-[11px] font-medium tracking-wide text-muted-foreground">{title}</h4>
+      {children}
+    </section>
+  )
+}
+
+function KVList({ children }: { children: React.ReactNode }) {
+  return <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">{children}</dl>
+}
+
+/** Token 构成条：输入 / 缓存读 / 缓存写 / 输出 / 图像，宽度按占比 */
+function TokenMixBar({ u }: { u: GatewayUsageLog }) {
+  const parts = [
+    { v: u.input_tokens || 0, cls: "bg-emerald-500", label: "输入" },
+    { v: u.cache_read_tokens || 0, cls: "bg-sky-500", label: "缓存读" },
+    { v: u.cache_creation_tokens || 0, cls: "bg-amber-500", label: "缓存写" },
+    { v: u.output_tokens || 0, cls: "bg-violet-500", label: "输出" },
+    { v: u.image_output_tokens || 0, cls: "bg-pink-500", label: "图像" },
+  ]
+  const total = parts.reduce((a, p) => a + p.v, 0)
+  if (total <= 0) return <div className="h-1.5 rounded-full bg-muted" />
+  return (
+    <div className="flex h-1.5 overflow-hidden rounded-full bg-muted">
+      {parts
+        .filter((p) => p.v > 0)
+        .map((p) => (
+          <div
+            key={p.label}
+            className={p.cls}
+            style={{ width: `${(p.v / total) * 100}%` }}
+            title={`${p.label} ${formatTokens(p.v)}（${((p.v / total) * 100).toFixed(1)}%）`}
+          />
+        ))}
+    </div>
+  )
+}
+
+/** 耗时时间轴：首字前的等待 + 生成阶段，按总耗时比例 */
+function LatencyTimeline({ u }: { u: GatewayUsageLog }) {
+  const total = u.duration_ms || 0
+  if (total <= 0) return <div className="h-1.5 rounded-full bg-muted" />
+  const ft = u.first_token_ms ?? null
+  const waitPct = ft != null ? Math.min(100, (ft / total) * 100) : 100
+  const fSev = ft != null ? firstTokenSeverity(ft) : durationSeverity(total)
+  return (
+    <div className="flex h-1.5 overflow-hidden rounded-full bg-muted" title="首字前等待 | 生成">
+      <div className={cn(LATENCY_BAR[fSev], "opacity-90")} style={{ width: `${waitPct}%` }} />
+      {ft != null ? <div className="bg-primary/60" style={{ width: `${100 - waitPct}%` }} /> : null}
+    </div>
+  )
+}
+
+function multiplierText(v?: number | null) {
+  if (v == null || !Number.isFinite(v)) return "—"
+  return `${v.toFixed(v >= 10 ? 2 : 4).replace(/0+$/, "").replace(/\.$/, "")}x`
+}
+
+function UsageDetailRow({
+  u,
+  chain,
+  chainExpanded,
+  onToggleChain,
+  errorOpen,
+  onToggleError,
+  onOpen,
+}: {
+  u: GatewayUsageLog
+  chain?: GatewayUsageLog[]
+  chainExpanded: boolean
+  onToggleChain: () => void
+  errorOpen: Record<number, boolean>
+  onToggleError: (id: number) => void
+  onOpen: () => void
+}) {
+  const steps = mappingSteps(u)
+  const chainTotal = chain?.length ?? 1
+  const hasChain = chainTotal > 1
+  const chainIndex = hasChain ? chain!.findIndex((r) => r.id === u.id) + 1 : undefined
+  const reqID = (u.request_id || "").trim()
+  const d = new Date(u.created_at)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  const hit = cacheHitRate(u)
+  const speed = outputSpeed(u)
+  const standard = u.total_cost || 0
+  const actual = u.actual_cost || 0
+  const effectiveMul = standard > 0 ? actual / standard : null
+  const effort = (u.reasoning_effort || "").trim()
+  const tier = (u.service_tier || "").trim()
+  const sg = formatSourceGroupDisplay(u.source_group_name)
+  const inbound = u.inbound_endpoint?.trim() || "—"
+  const upstream = u.upstream_endpoint?.trim() || "—"
+  const isFail = !u.success && !isClientDisconnectResult(u)
+  const showError = (isFail || isClientDisconnectResult(u)) && (u.error_message || hasErrorDetail(u))
+  const errOpen = !!errorOpen[u.id]
+  const gen = u.first_token_ms != null ? Math.max(0, (u.duration_ms || 0) - u.first_token_ms) : null
+
+  return (
+    <article
+      className={cn(
+        "overflow-hidden rounded-lg border border-l-[3px] border-border bg-card shadow-xs transition-shadow hover:shadow-sm",
+        stripeClass(u, hasChain),
+      )}
+    >
+      {/* 身份行：结果 · 时间 · Request ID · 实收（本行最重要的数字） */}
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border/70 bg-muted/35 px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          <ResultBadge u={u} />
+          {u.status_code > 0 ? (
+            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">HTTP {u.status_code}</span>
+          ) : null}
+          <AttemptBadge u={u} chainTotal={hasChain ? chainTotal : undefined} chainIndex={chainIndex} />
+          {!u.success && u.error_type && u.error_type !== "client" ? (
+            <span className={cn(CHIP, "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200")}>
+              {errorTypeLabel(u.error_type)}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex items-baseline gap-2" title={fullDateTime(u.created_at)}>
+          {Number.isNaN(d.getTime()) ? null : (
+            <>
+              <span className="font-mono text-sm font-medium tabular-nums">
+                {pad(d.getHours())}:{pad(d.getMinutes())}:{pad(d.getSeconds())}
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                {d.getFullYear()}/{pad(d.getMonth() + 1)}/{pad(d.getDate())} · {relativeTime(u.created_at)}
+              </span>
+            </>
+          )}
+        </div>
+        {reqID ? (
+          <button
+            type="button"
+            className="inline-flex min-w-0 items-center gap-1 rounded px-1 font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="复制 Request ID"
+            onClick={() => void copyText("Request ID", reqID)}
+          >
+            <span className="truncate">{reqID}</span>
+            <Copy className="size-3 shrink-0" />
+          </button>
+        ) : null}
+        <div className="ml-auto flex items-center gap-3">
+          <div className="text-right leading-tight">
+            <div className="text-[10px] text-muted-foreground">实收</div>
+            <div
+              className={cn(
+                "font-mono text-base font-semibold tabular-nums",
+                actual > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+              )}
+            >
+              {money6(actual)}
+            </div>
+          </div>
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={onOpen}>
+            详情
+          </Button>
+        </div>
+      </header>
+
+      {/* 五个信息块：模型与请求 / 路由 / Token / 费用 / 性能 */}
+      <div className="grid gap-x-6 gap-y-4 px-3 py-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1.1fr)_minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,0.95fr)]">
+        <DetailBlock title="模型与请求">
+          <div className="space-y-0.5">
+            <div className="font-mono text-sm font-semibold [overflow-wrap:anywhere]">{steps[0]}</div>
+            {steps.slice(1).map((step, i) => (
+              <div key={`${u.id}-s-${i}`} className="font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+                ↳ {step}
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            <span
+              className={cn(
+                CHIP,
+                effort
+                  ? "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200"
+                  : "bg-muted text-muted-foreground",
+              )}
+              title="推理强度"
+            >
+              推理 {effort ? formatReasoningEffort(effort) : "未指定"}
+            </span>
+            <span className={cn(CHIP, requestTypeClass(u))}>{requestTypeLabel(u)}</span>
+            <span className={cn(CHIP, billingModeClass(u.billing_mode))}>{billingModeLabel(u.billing_mode)}</span>
+            {tier ? (
+              <span className={cn(CHIP, "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200")} title="服务档位">
+                档位 {tier}
+              </span>
+            ) : null}
+            {u.protocol_converted ? (
+              <span className={cn(CHIP, "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200")}>
+                协议转换
+              </span>
+            ) : null}
+          </div>
+          <KVList>
+            <KV label="入站" mono>{inbound}</KV>
+            <KV label="上游" mono muted={upstream === inbound}>{upstream}</KV>
+            <KV label="协议" mono>
+              {u.inbound_protocol || "—"} → {u.upstream_protocol || "—"}
+            </KV>
+          </KVList>
+        </DetailBlock>
+
+        <DetailBlock title="路由">
+          <KVList>
+            <KV label="密钥">
+              <span className="font-medium">{u.gateway_key_name || "—"}</span>
+              {u.gateway_key_id ? <span className="ml-1 text-muted-foreground">#{u.gateway_key_id}</span> : null}
+            </KV>
+            <KV label="网关组">
+              {u.gateway_group_name || "—"}
+              {u.gateway_group_id ? <span className="ml-1 text-muted-foreground">#{u.gateway_group_id}</span> : null}
+            </KV>
+            <KV label="上游账户">
+              <span className="font-medium">{accountLabel(u)}</span>
+              <span className="ml-1 text-muted-foreground">
+                {u.provider_name || u.gateway_provider_id ? "直连" : u.channel_id ? `渠道 #${u.channel_id}` : ""}
+              </span>
+            </KV>
+            <KV label="上游密钥">{u.source_api_key_name || "—"}</KV>
+            <KV label="源分组">{sg.label || "—"}</KV>
+            <KV label="路由" muted>{u.route_id ? `#${u.route_id}` : "—"}</KV>
+          </KVList>
+        </DetailBlock>
+
+        <DetailBlock title="Token">
+          <div className="flex items-baseline gap-2">
+            <span className="text-lg font-semibold tabular-nums">{formatTokens(totalTokens(u))}</span>
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {totalTokens(u).toLocaleString("en-US")} 合计
+            </span>
+          </div>
+          <TokenMixBar u={u} />
+          <KVList>
+            <KV label="输入">
+              <span className="text-emerald-700 dark:text-emerald-400">{formatTokens(u.input_tokens)}</span>
+              <span className="ml-1 text-muted-foreground">不含缓存</span>
+            </KV>
+            <KV label="缓存读">
+              <span className="text-sky-700 dark:text-sky-400">{formatTokens(u.cache_read_tokens)}</span>
+              {hit != null ? <span className="ml-1 text-muted-foreground">命中 {(hit * 100).toFixed(1)}%</span> : null}
+            </KV>
+            <KV label="缓存写">
+              <span className="text-amber-700 dark:text-amber-400">{formatTokens(u.cache_creation_tokens)}</span>
+              {(u.cache_creation_5m_tokens ?? 0) > 0 || (u.cache_creation_1h_tokens ?? 0) > 0 ? (
+                <span className="ml-1 text-muted-foreground">
+                  5m {formatTokens(u.cache_creation_5m_tokens)} · 1h {formatTokens(u.cache_creation_1h_tokens)}
+                </span>
+              ) : null}
+            </KV>
+            <KV label="输出">
+              <span className="text-violet-700 dark:text-violet-400">{formatTokens(u.output_tokens)}</span>
+              {(u.reasoning_tokens ?? 0) > 0 ? (
+                <span className="ml-1 text-muted-foreground">含推理 {formatTokens(u.reasoning_tokens)}</span>
+              ) : null}
+            </KV>
+            {(u.image_output_tokens ?? 0) > 0 ? (
+              <KV label="图像">
+                <span className="text-pink-700 dark:text-pink-400">{formatTokens(u.image_output_tokens)}</span>
+              </KV>
+            ) : null}
+          </KVList>
+        </DetailBlock>
+
+        <DetailBlock title="费用">
+          <KVList>
+            <KV label="标准">{money6(standard)}</KV>
+            <KV label="实际倍率">
+              <span className={cn(effectiveMul != null && effectiveMul < 1 && "text-orange-600 dark:text-orange-400")}>
+                {effectiveMul != null ? multiplierText(effectiveMul) : "—"}
+              </span>
+            </KV>
+            <KV label="计费倍率" muted>{multiplierText(u.billing_rate_multiplier || 1)}</KV>
+            <KV label="倍率" muted>{multiplierText(u.rate_multiplier || 1)}</KV>
+            {u.account_rate_multiplier != null && u.account_rate_multiplier !== 1 ? (
+              <KV label="账号倍率" muted>{multiplierText(u.account_rate_multiplier)}</KV>
+            ) : null}
+          </KVList>
+          <div className="space-y-0.5 border-t border-dashed border-border pt-1.5 text-[11px] tabular-nums text-muted-foreground">
+            <div className="flex justify-between gap-2"><span>输入</span><span>{money6(u.input_cost)}</span></div>
+            <div className="flex justify-between gap-2"><span>输出</span><span>{money6(u.output_cost)}</span></div>
+            <div className="flex justify-between gap-2"><span>缓存读</span><span>{money6(u.cache_read_cost)}</span></div>
+            <div className="flex justify-between gap-2"><span>缓存写</span><span>{money6(u.cache_creation_cost)}</span></div>
+            {(u.image_output_cost ?? 0) > 0 ? (
+              <div className="flex justify-between gap-2"><span>图像</span><span>{money6(u.image_output_cost)}</span></div>
+            ) : null}
+            {(u.account_stats_cost ?? 0) > 0 ? (
+              <div className="flex justify-between gap-2"><span>账号统计</span><span>{money6(u.account_stats_cost)}</span></div>
+            ) : null}
+          </div>
+        </DetailBlock>
+
+        <DetailBlock title="性能">
+          <div className="flex items-baseline gap-2">
+            <span className={cn("text-lg font-semibold tabular-nums", LATENCY_TEXT[durationSeverity(u.duration_ms ?? 0)])}>
+              {formatDurationMS(u.duration_ms)}
+            </span>
+            <span className="text-[11px] text-muted-foreground">总耗时</span>
+          </div>
+          <LatencyTimeline u={u} />
+          <KVList>
+            <KV label="首字">
+              {u.first_token_ms != null ? (
+                <span className={LATENCY_TEXT[firstTokenSeverity(u.first_token_ms)]}>{formatDurationMS(u.first_token_ms)}</span>
+              ) : (
+                "—"
+              )}
+            </KV>
+            <KV label="生成">{gen != null ? formatDurationMS(gen) : "—"}</KV>
+            <KV label="速度">{speed != null ? `${speed >= 100 ? speed.toFixed(0) : speed.toFixed(1)} tok/s` : "—"}</KV>
+          </KVList>
+        </DetailBlock>
+      </div>
+
+      {/* 错误：完整原文直接显示，上游 body / header 等大字段点开再拉 */}
+      {showError ? (
+        <div
+          className={cn(
+            "space-y-2 border-t px-3 py-2.5",
+            isFail
+              ? "border-red-200/70 bg-red-50/60 dark:border-red-900/40 dark:bg-red-950/20"
+              : "border-amber-200/70 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20",
+          )}
+        >
+          <div className="flex flex-wrap items-start gap-2">
+            <p
+              className={cn(
+                "min-w-0 flex-1 whitespace-pre-wrap text-xs [overflow-wrap:anywhere]",
+                isFail ? "text-red-800 dark:text-red-200" : "text-amber-900 dark:text-amber-200",
+              )}
+            >
+              {u.error_message || (isFail ? "请求失败（无错误摘要）" : "客户端在流式响应过程中关闭连接")}
+            </p>
+            {hasErrorDetail(u) ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-6 shrink-0 px-2 text-[11px]"
+                onClick={() => onToggleError(u.id)}
+              >
+                {errOpen ? "收起上游详情" : "上游 body / header"}
+              </Button>
+            ) : null}
+          </div>
+          {u.upstream_url ? (
+            <div className="font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">{u.upstream_url}</div>
+          ) : null}
+          {errOpen ? <ErrorDetailPanel u={u} /> : null}
+        </div>
+      ) : null}
+
+      {hasChain ? (
+        <div className="border-t border-border/70 px-3 py-2">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-xs font-medium text-violet-700 hover:underline dark:text-violet-300"
+            onClick={onToggleChain}
+          >
+            {chainExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            同一请求共 {chainTotal} 次尝试（重试 / 顺延链路）
+          </button>
+          {chainExpanded ? (
+            <div className="mt-2">
+              <ChainTimeline rows={chain!} errorOpen={errorOpen} onToggleError={onToggleError} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* 客户端信息：完整显示，不截断 */}
+      <footer className="flex flex-wrap gap-x-5 gap-y-1 border-t border-border/70 px-3 py-1.5 text-[11px] text-muted-foreground">
+        <span>
+          IP <span className="font-mono text-foreground/80">{u.ip_address || "—"}</span>
+        </span>
+        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+          UA <span className="font-mono text-foreground/80">{u.user_agent?.trim() || "—"}</span>
+        </span>
+        {u.cooldown_until ? (
+          <span className="text-amber-700 dark:text-amber-400">路由冷却至 {fullDateTime(u.cooldown_until)}</span>
+        ) : null}
+        <span className="font-mono">#{u.id}</span>
+      </footer>
+    </article>
+  )
+}
+
+const USAGE_VIEW_STORAGE_KEY = "gateway-usage-view-v1"
+type UsageView = "detail" | "table"
+
+function loadUsageView(): UsageView {
+  try {
+    return window.localStorage.getItem(USAGE_VIEW_STORAGE_KEY) === "table" ? "table" : "detail"
+  } catch {
+    return "detail"
+  }
+}
+
 export function GatewayUsageTable({
   items,
   emptyText = "暂无使用记录",
@@ -1629,6 +2069,15 @@ export function GatewayUsageTable({
   const [chainOpen, setChainOpen] = useState<Record<string, boolean>>({})
   const [cleanupOpen, setCleanupOpen] = useState(false)
   const [detailRow, setDetailRow] = useState<GatewayUsageLog | null>(null)
+  const [view, setView] = useState<UsageView>(() => loadUsageView())
+  const changeView = (v: UsageView) => {
+    setView(v)
+    try {
+      window.localStorage.setItem(USAGE_VIEW_STORAGE_KEY, v)
+    } catch {
+      /* ignore */
+    }
+  }
   const [colVisible, setColVisible] = useState<UsageColVisibility>(() =>
     loadUsageColVisibility(),
   )
@@ -1705,7 +2154,34 @@ export function GatewayUsageTable({
   return (
     <TooltipProvider delayDuration={200}>
       <div className="space-y-2">
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex rounded-md border bg-card p-0.5" role="tablist" aria-label="列表视图">
+            {(
+              [
+                { id: "detail", label: "详细", icon: Rows3, tip: "每条请求一张卡片，全部字段直接显示" },
+                { id: "table", label: "表格", icon: TableIcon, tip: "紧凑表格，适合快速扫读" },
+              ] as const
+            ).map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                role="tab"
+                aria-selected={view === o.id}
+                title={o.tip}
+                onClick={() => changeView(o.id)}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs transition-colors",
+                  view === o.id
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                <o.icon className="size-3.5" />
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
           <Button
             type="button"
             size="sm"
@@ -1716,6 +2192,7 @@ export function GatewayUsageTable({
             <Trash2 className="size-3.5" />
             清理
           </Button>
+          {view === "table" ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5">
@@ -1745,6 +2222,8 @@ export function GatewayUsageTable({
               <DropdownMenuItem onSelect={resetCols}>恢复默认</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          ) : null}
+          </div>
         </div>
 
         <UsageCleanupDialog
@@ -1765,8 +2244,33 @@ export function GatewayUsageTable({
           }}
         />
 
-        {/* 表格自身滚动（横向 + 纵向），表头吸顶；内层 table 容器不再单独滚动 */}
-        <div className="max-h-[calc(100vh-12rem)] overflow-auto rounded-md border [&>[data-slot=table-container]]:overflow-visible">
+        {view === "detail" ? (
+          <div className="space-y-2.5">
+            {mainRows.map((u) => {
+              const rid = (u.request_id || "").trim()
+              const chain = rid ? chainByReq.get(rid) : undefined
+              return (
+                <UsageDetailRow
+                  key={u.id}
+                  u={u}
+                  chain={chain}
+                  chainExpanded={!!chainOpen[rid]}
+                  onToggleChain={() => setChainOpen((prev) => ({ ...prev, [rid]: !prev[rid] }))}
+                  errorOpen={errorOpen}
+                  onToggleError={(id) => setErrorOpen((prev) => ({ ...prev, [id]: !prev[id] }))}
+                  onOpen={() => setDetailRow(u)}
+                />
+              )
+            })}
+            {mainRows.length === 0 ? (
+              <div className="rounded-lg border border-dashed bg-card py-14 text-center text-sm text-muted-foreground">
+                {emptyText}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+        /* 表格自身滚动（横向 + 纵向），表头吸顶；内层 table 容器不再单独滚动 */
+        <div className="max-h-[calc(100vh-12rem)] overflow-auto rounded-md border bg-card [&>[data-slot=table-container]]:overflow-visible">
           <Table className="w-max min-w-full">
             <TableHeader className="sticky top-0 z-10 bg-background shadow-[inset_0_-1px_0_var(--border)]">
               <TableRow className="hover:bg-transparent">
@@ -1996,6 +2500,7 @@ export function GatewayUsageTable({
             </TableBody>
           </Table>
         </div>
+        )}
       </div>
     </TooltipProvider>
   )

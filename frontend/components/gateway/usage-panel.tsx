@@ -395,7 +395,7 @@ export function UsagePanel({
   return (
     <div className="space-y-4">
 {stats ? (
-  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+  <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3 xl:grid-cols-6">
     {[
       {
         label: "请求数",
@@ -436,10 +436,10 @@ export function UsagePanel({
     ].map((tile) => (
       <div
         key={tile.label}
-        className="flex min-h-[4.75rem] min-w-0 flex-col justify-between gap-0.5 rounded-xl border border-border bg-muted/20 px-3 py-2.5"
+        className="flex min-h-[5.25rem] min-w-0 flex-col justify-between gap-0.5 rounded-xl border border-border bg-card px-3.5 py-3 shadow-xs"
       >
-        <span className="text-[11px] text-muted-foreground">{tile.label}</span>
-        <div className="truncate text-xl font-semibold tabular-nums tracking-tight">
+        <span className="text-xs text-muted-foreground">{tile.label}</span>
+        <div className="truncate text-2xl font-semibold tabular-nums tracking-tight">
           {tile.value}
         </div>
         {tile.hint ? (
@@ -460,10 +460,11 @@ export function UsagePanel({
   </div>
 ) : null}
 
-<Card className="overflow-hidden border-border shadow-none">
-  <CardContent className="space-y-3 p-4 sm:p-5">
+{/* 筛选是一个独立面板；列表直接放在页面底色上，避免卡片套卡片 */}
+<Card className="overflow-hidden border-border py-0 shadow-xs">
+  <CardContent className="p-0">
     {/* 筛选条：维度筛选即选即查；时间用快捷范围 + 自定义 */}
-    <div className="space-y-3 rounded-xl border border-border bg-muted/15 p-3 sm:p-4">
+    <div className="space-y-3 p-3 sm:p-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <div className="space-y-1.5">
           <Label className="text-xs font-medium text-muted-foreground">
@@ -605,13 +606,13 @@ export function UsagePanel({
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
             <Input
               type="datetime-local"
               step={1}
               aria-label="开始时间"
               className={cn(
-                "h-8 w-[13.5rem] bg-background font-mono text-xs",
+                "h-8 w-full bg-background font-mono text-xs sm:w-[13.5rem]",
                 !usageRange && "border-primary/60",
               )}
               value={usageFrom}
@@ -620,13 +621,13 @@ export function UsagePanel({
                 setUsageFrom(e.target.value)
               }}
             />
-            <span className="text-xs text-muted-foreground">至</span>
+            <span className="hidden text-xs text-muted-foreground sm:inline">至</span>
             <Input
               type="datetime-local"
               step={1}
               aria-label="结束时间"
               className={cn(
-                "h-8 w-[13.5rem] bg-background font-mono text-xs",
+                "h-8 w-full bg-background font-mono text-xs sm:w-[13.5rem]",
                 !usageRange && "border-primary/60",
               )}
               value={usageTo}
@@ -725,6 +726,8 @@ export function UsagePanel({
         </div>
       </div>
     </div>
+  </CardContent>
+</Card>
 
     {usageLoading && !usage ? (
       <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
@@ -743,7 +746,7 @@ export function UsagePanel({
           />
         </div>
         {/* 分页：始终展示总数；多页时显示翻页与每页条数 */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2 text-sm shadow-xs">
           <div className="text-muted-foreground">
             {usageLoading ? (
               <span className="inline-flex items-center gap-1.5">
@@ -854,9 +857,6 @@ export function UsagePanel({
         </div>
       </>
     )}
-  </CardContent>
-</Card>
-
     </div>
   )
 }
