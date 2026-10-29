@@ -4,10 +4,12 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/bejix/upstream-ops/backend/config"
+	"github.com/bejix/upstream-ops/backend/kv"
 	"github.com/bejix/upstream-ops/backend/monitor"
 	"github.com/bejix/upstream-ops/backend/storage"
 	"gorm.io/gorm"
@@ -97,5 +99,37 @@ func TestRunRatesTriggersGatewayResort(t *testing.T) {
 
 	if gatewayResort.called != 1 {
 		t.Fatalf("gateway resort calls = %d, want 1", gatewayResort.called)
+	}
+}
+
+func TestLockedJobRunsOnceAcrossInstances(t *testing.T) {
+	store := kv.NewMemory()
+	t.Cleanup(func() { _ = store.Close() })
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	a := &Scheduler{log: log, kv: store}
+	b := &Scheduler{log: log, kv: store}
+
+	var runs int32
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	slow := func() {
+		atomic.AddInt32(&runs, 1)
+		close(started)
+		<-finish
+	}
+	done := make(chan struct{})
+	go func() { a.locked("job", slow)(); close(done) }()
+	<-started
+	// 另一个实例同一时刻触发：锁被占，跳过
+	b.locked("job", func() { atomic.AddInt32(&runs, 1) })()
+	close(finish)
+	<-done
+	if got := atomic.LoadInt32(&runs); got != 1 {
+		t.Fatalf("job ran %d times while locked, want 1", got)
+	}
+	// 释放后下一轮可以正常执行
+	b.locked("job", func() { atomic.AddInt32(&runs, 1) })()
+	if got := atomic.LoadInt32(&runs); got != 2 {
+		t.Fatalf("job should run after lock release, runs=%d", got)
 	}
 }

@@ -1901,3 +1901,47 @@ func TestCopyAllPreservesDataAndSequences(t *testing.T) {
 		t.Fatalf("copy into non-empty target must be refused")
 	}
 }
+
+func TestOnGatewayAuthChange(t *testing.T) {
+	db := openTestDB(t)
+	var bumps int
+	if err := OnGatewayAuthChange(db, func() { bumps++ }); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	groups := NewGatewayGroups(db)
+	keys := NewGatewayKeys(db)
+	g := &GatewayGroup{Name: "g"}
+	if err := groups.Create(g); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	k := &GatewayKey{GroupID: g.ID, Name: "k", KeyHash: "h", KeyPrefix: "sk", KeyCipher: "c"}
+	if err := keys.Create(k); err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+	if bumps != 2 {
+		t.Fatalf("creates should bump twice, got %d", bumps)
+	}
+	// 每请求都会发生的写入不能让缓存失效
+	_ = keys.TouchLastUsed(k.ID, time.Now())
+	_ = keys.AddQuotaUsed(k.ID, 0.5)
+	if bumps != 2 {
+		t.Fatalf("hot-column updates must not bump, got %d", bumps)
+	}
+	k.Status = "disabled"
+	if err := keys.Update(k); err != nil {
+		t.Fatalf("update key: %v", err)
+	}
+	if bumps != 3 {
+		t.Fatalf("status change must bump, got %d", bumps)
+	}
+	// 无关表不触发
+	if err := NewGatewayUsageLogs(db).Create(&GatewayUsageLog{RequestID: "x", RequestedModel: "m", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	if err := keys.Delete(k.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if bumps != 4 {
+		t.Fatalf("delete must bump (and usage insert must not), got %d", bumps)
+	}
+}

@@ -64,13 +64,13 @@ func registerGatewayAdmin(g *gin.RouterGroup, d *Deps) {
 		gp.POST("/providers/:id/reveal", func(c *gin.Context) { revealGatewayProvider(c, d) })
 
 		// usage
-		gp.GET("/dispatch/stats", func(c *gin.Context) { statsGatewayDispatch(c, d) })
-		gp.GET("/dispatch/trends", func(c *gin.Context) { trendsGatewayDispatch(c, d) })
-		gp.GET("/dispatch/errors", func(c *gin.Context) { errorsGatewayDispatch(c, d) })
-		gp.GET("/dispatch/flow", func(c *gin.Context) { flowGatewayDispatch(c, d) })
+		gp.GET("/dispatch/stats", cachedGET(d, statsCacheTTL, func(c *gin.Context) { statsGatewayDispatch(c, d) }))
+		gp.GET("/dispatch/trends", cachedGET(d, statsCacheTTL, func(c *gin.Context) { trendsGatewayDispatch(c, d) }))
+		gp.GET("/dispatch/errors", cachedGET(d, statsCacheTTL, func(c *gin.Context) { errorsGatewayDispatch(c, d) }))
+		gp.GET("/dispatch/flow", cachedGET(d, statsCacheTTL, func(c *gin.Context) { flowGatewayDispatch(c, d) }))
 		gp.GET("/usage", func(c *gin.Context) { listGatewayUsage(c, d) })
-		gp.GET("/usage/stats", func(c *gin.Context) { statsGatewayUsage(c, d) })
-		gp.GET("/usage/models", func(c *gin.Context) { listGatewayUsageModels(c, d) })
+		gp.GET("/usage/stats", cachedGET(d, statsCacheTTL, func(c *gin.Context) { statsGatewayUsage(c, d) }))
+		gp.GET("/usage/models", cachedGET(d, statsCacheTTL, func(c *gin.Context) { listGatewayUsageModels(c, d) }))
 		gp.GET("/usage/detail/:id", func(c *gin.Context) { getGatewayUsageDetail(c, d) })
 		gp.POST("/usage/cleanup", func(c *gin.Context) { cleanupGatewayUsage(c, d) })
 

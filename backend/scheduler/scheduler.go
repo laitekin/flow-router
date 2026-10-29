@@ -9,6 +9,7 @@ import (
 	"github.com/bejix/upstream-ops/backend/captcha"
 	"github.com/bejix/upstream-ops/backend/config"
 	"github.com/bejix/upstream-ops/backend/crypto"
+	"github.com/bejix/upstream-ops/backend/kv"
 	"github.com/bejix/upstream-ops/backend/monitor"
 	"github.com/bejix/upstream-ops/backend/storage"
 	"github.com/robfig/cron/v3"
@@ -28,6 +29,38 @@ type Scheduler struct {
 	cipher        *crypto.Cipher
 	gatewayResort gatewayRateResortService
 	proxy         config.ProxyConfig
+	// kv 用于任务锁：多实例共用一个数据库时同一任务只在一个实例上跑；nil 时不加锁
+	kv kv.Store
+}
+
+// jobLockTTL 任务锁的兜底过期时间：任务本身 5 分钟超时，正常结束会主动释放；
+// 持锁实例崩溃时最多这么久后别的实例能接手。
+const jobLockTTL = 10 * time.Minute
+
+// SetKV 注入任务锁后端（Redis 时跨实例互斥，内存时只防同一进程内任务重叠）。
+func (s *Scheduler) SetKV(store kv.Store) { s.kv = store }
+
+// locked 包一层分布式锁：拿不到锁说明别的实例（或上一轮）正在跑，本轮跳过。
+// kv 出错时照常执行，宁可重复也不漏跑。
+func (s *Scheduler) locked(name string, fn func()) func() {
+	return func() {
+		if s.kv == nil {
+			fn()
+			return
+		}
+		release, ok, err := kv.Lock(context.Background(), s.kv, "sched:lock:"+name, jobLockTTL)
+		if err != nil {
+			s.log.Warn("scheduler lock unavailable, running anyway", "job", name, "err", err)
+			fn()
+			return
+		}
+		if !ok {
+			s.log.Debug("scheduler job skipped: held by another run", "job", name)
+			return
+		}
+		defer release()
+		fn()
+	}
 }
 
 // gatewayRateResortService 倍率扫描后重排开启了「渠道分组价格倍率重排」的网关组。
@@ -68,17 +101,17 @@ func New(
 // Start 注册 cron 任务并启动。
 func (s *Scheduler) Start() error {
 	if s.cfg.BalanceCron != "" {
-		if _, err := s.cron.AddFunc(s.cfg.BalanceCron, s.runBalance); err != nil {
+		if _, err := s.cron.AddFunc(s.cfg.BalanceCron, s.locked("balance", s.runBalance)); err != nil {
 			return err
 		}
 	}
 	if s.cfg.RateCron != "" {
-		if _, err := s.cron.AddFunc(s.cfg.RateCron, s.runRates); err != nil {
+		if _, err := s.cron.AddFunc(s.cfg.RateCron, s.locked("rates", s.runRates)); err != nil {
 			return err
 		}
 	}
 	if s.cfg.Retention.Cron != "" && s.hasRetention() {
-		if _, err := s.cron.AddFunc(s.cfg.Retention.Cron, s.runRetention); err != nil {
+		if _, err := s.cron.AddFunc(s.cfg.Retention.Cron, s.locked("retention", s.runRetention)); err != nil {
 			return err
 		}
 	}

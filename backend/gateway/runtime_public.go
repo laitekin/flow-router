@@ -26,16 +26,13 @@ func (rt *Runtime) HandleModels(c *gin.Context) {
 		return
 	}
 	key, group := auth.Key, auth.Group
-	_ = rt.Keys.TouchLastUsed(key.ID, time.Now())
+	rt.touchKey(c.Request.Context(), key.ID)
 
-	rt.modelsCacheMu.Lock()
-	if ent, ok := rt.modelsCache[group.ID]; ok && time.Since(ent.at) < rt.gatewayRuntime().ModelsCacheTTL() {
-		body := ent.body
-		rt.modelsCacheMu.Unlock()
+	// 模型列表缓存放 kv：多实例共享，管理端改模型后 invalidateModelsCache 统一删除
+	if body, ok, err := rt.KV.Get(c.Request.Context(), modelsCacheKey(group.ID)); err == nil && ok {
 		c.Data(http.StatusOK, "application/json", body)
 		return
 	}
-	rt.modelsCacheMu.Unlock()
 
 	type modelObj struct {
 		ID      string `json:"id"`
@@ -138,9 +135,7 @@ func (rt *Runtime) HandleModels(c *gin.Context) {
 	}
 
 	payload, _ := json.Marshal(gin.H{"object": "list", "data": data})
-	rt.modelsCacheMu.Lock()
-	rt.modelsCache[group.ID] = modelsCacheEntry{at: time.Now(), body: payload}
-	rt.modelsCacheMu.Unlock()
+	_ = rt.KV.Set(c.Request.Context(), modelsCacheKey(group.ID), payload, rt.gatewayRuntime().ModelsCacheTTL())
 	c.Data(http.StatusOK, "application/json", payload)
 }
 

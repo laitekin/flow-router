@@ -10,6 +10,7 @@ package gateway
 
 import (
 	"context"
+	"github.com/bejix/upstream-ops/backend/kv"
 	"log/slog"
 	"sync"
 	"time"
@@ -50,6 +51,8 @@ type Service struct {
 	Cipher     *crypto.Cipher
 	Pricing    *PricingCatalog
 	Log        *slog.Logger
+	// KV 缓存 / 节流后端：默认进程内内存，配置 Redis 后由 SetKV 替换为 Redis
+	KV kv.Store
 
 	// Admin 管理面；嵌入 *Service 共享依赖。
 	Admin *AdminService
@@ -61,18 +64,10 @@ type Service struct {
 	upstream    config.UpstreamConfig
 	gatewayCfg  config.GatewayConfig
 
-	modelsCacheMu sync.Mutex
-	modelsCache   map[uint]modelsCacheEntry // keyed by group id
-
 	// 源分组列表缓存（ListAPIKeyGroups 远程调用昂贵；列表接口不再实时拉，运行时/保存仍可复用缓存）
 	channelGroupsCacheMu    sync.Mutex
 	channelGroupsCache      map[uint]channelGroupsCacheEntry // keyed by channel id
 	channelGroupsRefreshing map[uint]struct{}                // 后台刷新单飞占位，keyed by channel id
-}
-
-type modelsCacheEntry struct {
-	at   time.Time
-	body []byte
 }
 
 type channelGroupsCacheEntry struct {
@@ -104,7 +99,7 @@ func NewService(
 		Pricing:                 NewPricingCatalog(prices),
 		Log:                     log,
 		gatewayCfg:              config.GatewayConfig{}.WithDefaults(),
-		modelsCache:             map[uint]modelsCacheEntry{},
+		KV:                      kv.NewMemory(),
 		channelGroupsCache:      map[uint]channelGroupsCacheEntry{},
 		channelGroupsRefreshing: map[uint]struct{}{},
 	}

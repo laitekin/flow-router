@@ -20,8 +20,8 @@ func (rt *Runtime) Authenticate(c *gin.Context) (*AuthResult, error) {
 	if raw == "" {
 		return nil, errors.New("missing api key")
 	}
-	key, err := rt.Keys.FindByHash(HashAPIKey(raw))
-	if err != nil {
+	key, group, err := rt.lookupAuth(c.Request.Context(), HashAPIKey(raw))
+	if key == nil {
 		return nil, errors.New("invalid api key")
 	}
 	if key.Status != storage.GatewayKeyStatusActive {
@@ -33,8 +33,7 @@ func (rt *Runtime) Authenticate(c *gin.Context) (*AuthResult, error) {
 	if key.Quota > 0 && key.QuotaUsed >= key.Quota {
 		return nil, errors.New("api key quota exceeded")
 	}
-	group, err := rt.Groups.FindByID(key.GroupID)
-	if err != nil {
+	if err != nil || group == nil {
 		return nil, errors.New("gateway group not found")
 	}
 	if group.Status != storage.GatewayGroupStatusActive {
