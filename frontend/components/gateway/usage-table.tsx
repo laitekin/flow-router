@@ -8,8 +8,6 @@ import {
   Copy,
   Info,
   Loader2,
-  Rows3,
-  Table as TableIcon,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -355,38 +353,46 @@ function UsageCleanupDialog({
   )
 }
 
-/** 访问日志可切换列（展开箭头列固定显示，不在此列） */
+/** 访问日志可切换列（展开箭头列固定显示，不在此列）；列划分沿用 sub2api：一列一个信息 */
 type UsageColId =
-  | "time"
   | "status"
-  | "model"
   | "key"
   | "account"
+  | "model"
+  | "reasoning"
   | "endpoint"
+  | "group"
+  | "type"
+  | "billing"
   | "token"
   | "cost"
   | "latency"
   | "ip"
+  | "time"
   | "userAgent"
 
-// v2：推理强度 / 类型 / 计费模式并入「模型」列，分组并入「密钥 / 分组」列
-const USAGE_COLS_STORAGE_KEY = "gateway-usage-columns-v2"
+// v3：从 v2 的合并列恢复为独立列
+const USAGE_COLS_STORAGE_KEY = "gateway-usage-columns-v3"
 
 const USAGE_COLUMNS: {
   id: UsageColId
   label: string
   defaultVisible: boolean
 }[] = [
-  { id: "time", label: "时间", defaultVisible: true },
   { id: "status", label: "状态", defaultVisible: true },
-  { id: "model", label: "模型 / 参数", defaultVisible: true },
-  { id: "key", label: "密钥 / 分组", defaultVisible: true },
-  { id: "account", label: "上游账户", defaultVisible: true },
+  { id: "key", label: "API 密钥", defaultVisible: true },
+  { id: "account", label: "账户", defaultVisible: true },
+  { id: "model", label: "模型", defaultVisible: true },
+  { id: "reasoning", label: "推理强度", defaultVisible: true },
   { id: "endpoint", label: "端点", defaultVisible: true },
+  { id: "group", label: "分组", defaultVisible: true },
+  { id: "type", label: "类型", defaultVisible: true },
+  { id: "billing", label: "计费模式", defaultVisible: true },
   { id: "token", label: "Token", defaultVisible: true },
   { id: "cost", label: "费用", defaultVisible: true },
-  { id: "latency", label: "延迟 / 速度", defaultVisible: true },
-  { id: "ip", label: "IP", defaultVisible: false },
+  { id: "latency", label: "延迟", defaultVisible: true },
+  { id: "ip", label: "IP", defaultVisible: true },
+  { id: "time", label: "时间", defaultVisible: true },
   { id: "userAgent", label: "User-Agent", defaultVisible: false },
 ]
 
@@ -468,27 +474,6 @@ const LATENCY_TEXT: Record<LatencySeverity, string> = {
   warn: "text-amber-600 dark:text-amber-400",
   slow: "text-orange-600 dark:text-orange-400",
   critical: "text-red-600 dark:text-red-400",
-}
-
-const LATENCY_BAR: Record<LatencySeverity, string> = {
-  good: "bg-emerald-500",
-  warn: "bg-amber-400",
-  slow: "bg-orange-500",
-  critical: "bg-red-500",
-}
-
-const LATENCY_FROM: Record<LatencySeverity, string> = {
-  good: "from-emerald-500",
-  warn: "from-amber-400",
-  slow: "from-orange-500",
-  critical: "from-red-500",
-}
-
-const LATENCY_TO: Record<LatencySeverity, string> = {
-  good: "to-emerald-500",
-  warn: "to-amber-400",
-  slow: "to-orange-500",
-  critical: "to-red-500",
 }
 
 function money6(v?: number | null) {
@@ -1080,39 +1065,26 @@ function TokenCell({ u }: { u: GatewayUsageLog }) {
   const hit = cacheHitRate(u)
   return (
     <div className="flex items-start gap-1.5">
-      <div className="space-y-0.5 text-xs">
-        <div className="text-sm font-semibold tabular-nums">
-          {formatTokens(totalTokens(u))}
-        </div>
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <span className="inline-flex items-center gap-0.5" title="输入（不含缓存）">
-            <ArrowDown className="size-3 text-emerald-500" />
-            <span className="tabular-nums text-foreground">{formatTokens(u.input_tokens)}</span>
+      <div className="space-y-1 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1" title="输入（不含缓存）">
+            <ArrowDown className="size-3.5 text-emerald-500" />
+            <span className="font-medium tabular-nums">{formatTokens(u.input_tokens)}</span>
           </span>
-          <span className="inline-flex items-center gap-0.5" title="输出">
-            <ArrowUp className="size-3 text-violet-500" />
-            <span className="tabular-nums text-foreground">{formatTokens(u.output_tokens)}</span>
+          <span className="inline-flex items-center gap-1" title={reasoning > 0 ? `输出（含推理 ${formatTokens(reasoning)}）` : "输出"}>
+            <ArrowUp className="size-3.5 text-violet-500" />
+            <span className="font-medium tabular-nums">{formatTokens(u.output_tokens)}</span>
           </span>
-          {reasoning > 0 ? (
-            <span className="tabular-nums" title="输出中的推理 tokens">
-              推理 {formatTokens(reasoning)}
-            </span>
-          ) : null}
         </div>
         {(u.cache_read_tokens > 0 || u.cache_creation_tokens > 0) && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
             {u.cache_read_tokens > 0 && (
-              <span className="tabular-nums text-sky-600 dark:text-sky-400" title="缓存读取">
+              <span className="font-medium tabular-nums text-sky-600 dark:text-sky-400" title={hit != null ? `缓存命中 ${(hit * 100).toFixed(1)}%` : "缓存读取"}>
                 读 {formatTokens(u.cache_read_tokens)}
-                {hit != null ? (
-                  <span className="ml-1 rounded bg-sky-100 px-1 text-[10px] dark:bg-sky-900/40">
-                    命中 {(hit * 100).toFixed(hit >= 0.995 ? 1 : 0)}%
-                  </span>
-                ) : null}
               </span>
             )}
             {u.cache_creation_tokens > 0 && (
-              <span className="tabular-nums text-amber-600 dark:text-amber-400" title="缓存写入">
+              <span className="font-medium tabular-nums text-amber-600 dark:text-amber-400" title="缓存写入">
                 写 {formatTokens(u.cache_creation_tokens)}
                 {(u.cache_creation_1h_tokens ?? 0) > 0 && (
                   <span className="ml-1 rounded bg-orange-100 px-1 text-[10px] text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400">
@@ -1147,13 +1119,30 @@ function TokenCell({ u }: { u: GatewayUsageLog }) {
           {u.cache_read_tokens > 0 && (
             <div className="flex justify-between gap-6">
               <span className="text-muted-foreground">缓存读取</span>
-              <span>{formatTokens(u.cache_read_tokens)}</span>
+              <span>
+                {formatTokens(u.cache_read_tokens)}
+                {hit != null ? ` · 命中 ${(hit * 100).toFixed(1)}%` : ""}
+              </span>
             </div>
           )}
           {u.cache_creation_tokens > 0 && (
             <div className="flex justify-between gap-6">
               <span className="text-muted-foreground">缓存创建</span>
               <span>{formatTokens(u.cache_creation_tokens)}</span>
+            </div>
+          )}
+          {((u.cache_creation_5m_tokens ?? 0) > 0 || (u.cache_creation_1h_tokens ?? 0) > 0) && (
+            <div className="flex justify-between gap-6">
+              <span className="text-muted-foreground">其中 5m / 1h</span>
+              <span>
+                {formatTokens(u.cache_creation_5m_tokens)} / {formatTokens(u.cache_creation_1h_tokens)}
+              </span>
+            </div>
+          )}
+          {(u.image_output_tokens ?? 0) > 0 && (
+            <div className="flex justify-between gap-6">
+              <span className="text-muted-foreground">图像输出</span>
+              <span>{formatTokens(u.image_output_tokens)}</span>
             </div>
           )}
           <div className="flex justify-between gap-6">
@@ -1223,6 +1212,18 @@ function CostCell({ u }: { u: GatewayUsageLog }) {
                 <span>{money6(u.cache_read_cost)}</span>
               </div>
             )}
+            {(u.image_output_cost ?? 0) > 0 && (
+              <div className="flex justify-between gap-6">
+                <span className="text-muted-foreground">图像</span>
+                <span>{money6(u.image_output_cost)}</span>
+              </div>
+            )}
+            {u.account_rate_multiplier != null && u.account_rate_multiplier !== 1 && (
+              <div className="flex justify-between gap-6">
+                <span className="text-muted-foreground">账号倍率</span>
+                <span className="text-blue-400">{u.account_rate_multiplier.toFixed(4)}x</span>
+              </div>
+            )}
             <div className="flex justify-between gap-6">
               <span className="text-muted-foreground">倍率</span>
               <span className="text-blue-400">{(u.rate_multiplier || 1).toFixed(4)}x</span>
@@ -1275,16 +1276,7 @@ function LatencyCell({ u }: { u: GatewayUsageLog }) {
   const fSev = hasFT ? firstTokenSeverity(u.first_token_ms!) : dSev
   const speed = outputSpeed(u)
   return (
-    <div className="flex items-stretch gap-2">
-      <span
-        className={cn(
-          "w-1 shrink-0 rounded-full",
-          hasFT
-            ? cn("bg-gradient-to-b from-40% to-60%", LATENCY_FROM[fSev], LATENCY_TO[dSev])
-            : LATENCY_BAR[dSev],
-        )}
-        aria-hidden
-      />
+    <div>
       <div className="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs">
         <span className="text-muted-foreground">首字</span>
         {hasFT ? (
@@ -1323,154 +1315,93 @@ function accountLabel(u: GatewayUsageLog) {
   )
 }
 
-const CHIP = "inline-flex items-center rounded px-1.5 py-px text-[10px] font-medium leading-4"
-
-function TimeCell({ u }: { u: GatewayUsageLog }) {
-  const d = new Date(u.created_at)
-  if (Number.isNaN(d.getTime())) return <span className="text-muted-foreground">—</span>
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return (
-    <div className="leading-tight" title={fullDateTime(u.created_at)}>
-      <div className="font-mono text-sm tabular-nums">
-        {pad(d.getHours())}:{pad(d.getMinutes())}:{pad(d.getSeconds())}
-      </div>
-      <div className="text-[11px] text-muted-foreground">
-        {pad(d.getMonth() + 1)}/{pad(d.getDate())} · {relativeTime(u.created_at)}
-      </div>
-    </div>
-  )
+function multiplierText(v?: number | null) {
+  if (v == null || !Number.isFinite(v)) return "—"
+  return `${Number(v.toFixed(4))}x`
 }
 
-/** 模型 + 本次请求参数（推理强度 / 流式 / 计费模式 / 服务档位）合在一格 */
 function ModelCell({ u }: { u: GatewayUsageLog }) {
   const steps = mappingSteps(u)
-  const effort = (u.reasoning_effort || "").trim()
-  const tier = (u.service_tier || "").trim()
-  const billing = (u.billing_mode || "").trim()
+  if (steps.length <= 1) return <CellText text={steps[0]} className="font-medium" />
   return (
-    <div className="space-y-1">
-      <div className="font-mono text-xs font-medium">{steps[0]}</div>
-      {steps.slice(1).map((step, i) => (
-        <div
-          key={`${u.id}-m-${i}`}
-          className="font-mono text-[11px] text-muted-foreground"
-          style={{ paddingLeft: `${i * 0.75}rem` }}
-        >
-          ↳ {step}
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="cursor-default space-y-0.5">
+          <CellText text={steps[0]} className="font-medium" />
+          <div className="whitespace-nowrap text-[11px] text-muted-foreground">↳ {steps[steps.length - 1]}</div>
         </div>
-      ))}
-      <div className="flex flex-wrap items-center gap-1">
-        {effort ? (
-          <span
-            className={cn(CHIP, "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200")}
-            title="推理强度"
-          >
-            {formatReasoningEffort(effort)}
-          </span>
-        ) : null}
-        <span className={cn(CHIP, requestTypeClass(u))}>{requestTypeLabel(u)}</span>
-        {billing && billing !== "token" ? (
-          <span className={cn(CHIP, billingModeClass(billing))}>{billingModeLabel(billing)}</span>
-        ) : null}
-        {tier && tier !== "default" && tier !== "auto" ? (
-          <span
-            className={cn(CHIP, "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200")}
-            title="服务档位"
-          >
-            {tier}
-          </span>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
-function KeyGroupCell({ u }: { u: GatewayUsageLog }) {
-  const keyName =
-    u.gateway_key_name || (u.gateway_key_id ? `#${u.gateway_key_id}` : "—")
-  const groupName = (u.gateway_group_name || "").trim()
-  const sg = formatSourceGroupDisplay(u.source_group_name)
-  const sourceTip = sg.tip ? sg.tip : sg.label ? `源 ${sg.label}` : undefined
-  const tag = (
-    <span
-      className={cn(
-        CHIP,
-        "whitespace-nowrap bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200",
-        sourceTip && "cursor-default",
-      )}
-    >
-      {groupName}
-    </span>
-  )
-  return (
-    <div className="space-y-1">
-      <div className="whitespace-nowrap text-sm font-medium">{keyName}</div>
-      {groupName ? (
-        sourceTip ? (
-          <Tooltip>
-            <TooltipTrigger asChild>{tag}</TooltipTrigger>
-            <TooltipContent side="top" className="space-y-0.5 text-xs">
-              <div className="font-medium">{groupName}</div>
-              <div className="text-muted-foreground">{sourceTip}</div>
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          tag
-        )
-      ) : null}
-    </div>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-xs">
+        映射：{steps.join(" → ")}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
 function AccountCell({ u }: { u: GatewayUsageLog }) {
-  // 两行：渠道/直连名 + 源密钥名（或「直连」）
+  // 两行：渠道 / 直连名 + 源密钥名（或「直连」）
   const isDirect = !!(u.provider_name || u.gateway_provider_id)
   const secondary = (u.source_api_key_name || "").trim() || (isDirect ? "直连" : "")
   return (
     <div className="flex flex-col gap-0.5 leading-tight">
-      <span className="whitespace-nowrap text-sm font-medium">{accountLabel(u)}</span>
-      {secondary ? (
-        <span className="whitespace-nowrap text-[11px] text-muted-foreground">{secondary}</span>
-      ) : null}
+      <span className="whitespace-nowrap font-medium">{accountLabel(u)}</span>
+      {secondary ? <span className="whitespace-nowrap text-[11px] text-muted-foreground">{secondary}</span> : null}
     </div>
   )
 }
 
-/** 入站与上游端点相同时只显示一行；不同才显示「→ 上游」与协议转换 */
 function EndpointCell({ u }: { u: GatewayUsageLog }) {
-  const inbound = u.inbound_endpoint?.trim() || "—"
-  const upstream = u.upstream_endpoint?.trim() || ""
-  const same = !upstream || upstream === inbound
   return (
-    <div className="space-y-0.5 font-mono text-xs">
-      <div className="whitespace-nowrap">{inbound}</div>
-      {!same ? (
-        <div className="whitespace-nowrap text-muted-foreground" title="上游端点">
-          → {upstream}
-        </div>
-      ) : null}
+    <div className="space-y-0.5 text-xs">
+      <div className="flex items-baseline gap-1 whitespace-nowrap">
+        <span className="text-muted-foreground">入站:</span>
+        <span>{u.inbound_endpoint?.trim() || "—"}</span>
+      </div>
+      <div className="flex items-baseline gap-1 whitespace-nowrap">
+        <span className="text-muted-foreground">上游:</span>
+        <span>{u.upstream_endpoint?.trim() || "—"}</span>
+      </div>
       {u.protocol_converted ? (
-        <span className={cn(CHIP, "font-sans bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200")}>
-          {u.inbound_protocol || "?"} → {u.upstream_protocol || "?"}
+        <span
+          className="inline-flex rounded bg-violet-100 px-1.5 py-px text-[10px] font-medium text-violet-800 dark:bg-violet-900/40 dark:text-violet-200"
+          title={`${u.inbound_protocol || "?"} → ${u.upstream_protocol || "?"}`}
+        >
+          协议转换
         </span>
       ) : null}
     </div>
   )
 }
 
-function DetailItem({
-  label,
-  children,
-  mono,
-}: {
-  label: string
-  children: React.ReactNode
-  mono?: boolean
-}) {
+function GroupCell({ u }: { u: GatewayUsageLog }) {
+  const groupName = (u.gateway_group_name || "").trim()
+  if (!groupName) return <span className="text-muted-foreground">—</span>
+  const sg = formatSourceGroupDisplay(u.source_group_name)
+  const sourceTip = sg.tip ? sg.tip : sg.label ? `源 ${sg.label}` : undefined
+  const tag = (
+    <span className="inline-flex whitespace-nowrap rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-200">
+      {groupName}
+    </span>
+  )
+  if (!sourceTip) return tag
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{tag}</TooltipTrigger>
+      <TooltipContent side="top" className="space-y-0.5 text-xs">
+        <div className="font-medium">{groupName}</div>
+        <div className="text-muted-foreground">{sourceTip}</div>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/* ───────────── 详情抽屉：点击行打开，全部字段 + 原始数据，保证不丢信息 ───────────── */
+
+function DetailItem({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
   return (
     <div className="min-w-0">
       <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className={cn("break-all text-sm", mono && "font-mono text-xs")}>{children}</div>
+      <div className={cn("text-sm tabular-nums [overflow-wrap:anywhere]", mono && "font-mono text-xs")}>{children}</div>
     </div>
   )
 }
@@ -1478,15 +1409,12 @@ function DetailItem({
 function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="space-y-2">
-      <h4 className="text-xs font-semibold text-muted-foreground">{title}</h4>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-lg border bg-muted/20 p-3">
-        {children}
-      </div>
+      <h4 className="text-xs font-medium text-muted-foreground">{title}</h4>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-md border bg-muted/30 p-3 sm:grid-cols-3">{children}</div>
     </section>
   )
 }
 
-/** 行详情抽屉：表格只放高频信息，其余字段都在这里 */
 function UsageDetailSheet({
   u,
   chain,
@@ -1497,12 +1425,15 @@ function UsageDetailSheet({
   onOpenChange: (open: boolean) => void
 }) {
   const [errorOpen, setErrorOpen] = useState<Record<number, boolean>>({})
+  const [rawOpen, setRawOpen] = useState(false)
   if (!u) return null
   const hit = cacheHitRate(u)
   const speed = outputSpeed(u)
   const showError = hasErrorDetail(u) && (!u.success || isClientDisconnectResult(u))
   const standard = u.total_cost || 0
   const actual = u.actual_cost || 0
+  const gen = u.first_token_ms != null ? Math.max(0, (u.duration_ms || 0) - u.first_token_ms) : null
+  const raw = JSON.stringify(u, null, 2)
   return (
     <Sheet open onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full gap-0 overflow-y-auto sm:max-w-2xl">
@@ -1511,13 +1442,14 @@ function UsageDetailSheet({
             <span className="font-mono text-base">{u.requested_model || "—"}</span>
             <ResultBadge u={u} />
             {u.status_code > 0 ? (
-              <span className="text-xs font-normal tabular-nums text-muted-foreground">
-                HTTP {u.status_code}
-              </span>
+              <span className="text-xs font-normal tabular-nums text-muted-foreground">HTTP {u.status_code}</span>
             ) : null}
+            <AttemptBadge u={u} chainTotal={chain && chain.length > 1 ? chain.length : undefined} chainIndex={chain && chain.length > 1 ? chain.findIndex((r) => r.id === u.id) + 1 : undefined} />
           </SheetTitle>
           <SheetDescription className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>{fullDateTime(u.created_at)}</span>
+            <span>
+              {fullDateTime(u.created_at)} · {relativeTime(u.created_at)}
+            </span>
             {u.request_id ? (
               <button
                 type="button"
@@ -1533,71 +1465,83 @@ function UsageDetailSheet({
         </SheetHeader>
 
         <div className="space-y-5 p-4">
+          {showError ? <ErrorDetailPanel u={u} /> : null}
+
           <DetailSection title="请求">
             <DetailItem label="请求模型" mono>{u.requested_model || "—"}</DetailItem>
             <DetailItem label="上游模型" mono>{u.upstream_model || u.requested_model || "—"}</DetailItem>
-            {u.model_mapping_chain ? (
-              <DetailItem label="映射链" mono>{u.model_mapping_chain}</DetailItem>
-            ) : null}
+            <DetailItem label="映射链" mono>{u.model_mapping_chain || "—"}</DetailItem>
             <DetailItem label="推理强度">{formatReasoningEffort(u.reasoning_effort)}</DetailItem>
-            <DetailItem label="类型 / 计费">
-              {requestTypeLabel(u)} · {billingModeLabel(u.billing_mode)}
-            </DetailItem>
-            {u.service_tier ? <DetailItem label="服务档位">{u.service_tier}</DetailItem> : null}
+            <DetailItem label="类型">{requestTypeLabel(u)}</DetailItem>
+            <DetailItem label="计费模式">{billingModeLabel(u.billing_mode)}</DetailItem>
+            <DetailItem label="服务档位">{u.service_tier || "—"}</DetailItem>
             <DetailItem label="入站端点" mono>{u.inbound_endpoint || "—"}</DetailItem>
             <DetailItem label="上游端点" mono>{u.upstream_endpoint || "—"}</DetailItem>
             <DetailItem label="协议">
               {u.inbound_protocol || "—"} → {u.upstream_protocol || "—"}
               {u.protocol_converted ? "（已转换）" : ""}
             </DetailItem>
+            <DetailItem label="上游 URL" mono>{u.upstream_url || "—"}</DetailItem>
           </DetailSection>
 
           <DetailSection title="路由">
             <DetailItem label="API 密钥">
-              {u.gateway_key_name || (u.gateway_key_id ? `#${u.gateway_key_id}` : "—")}
+              {u.gateway_key_name || "—"} <span className="text-muted-foreground">#{u.gateway_key_id}</span>
             </DetailItem>
-            <DetailItem label="网关组">{u.gateway_group_name || "—"}</DetailItem>
+            <DetailItem label="网关组">
+              {u.gateway_group_name || "—"} <span className="text-muted-foreground">#{u.gateway_group_id}</span>
+            </DetailItem>
             <DetailItem label="上游账户">{accountLabel(u)}</DetailItem>
             <DetailItem label="上游密钥">{u.source_api_key_name || "—"}</DetailItem>
-            <DetailItem label="源分组">
-              {formatSourceGroupDisplay(u.source_group_name).label || "—"}
+            <DetailItem label="源分组">{formatSourceGroupDisplay(u.source_group_name).label || "—"}</DetailItem>
+            <DetailItem label="路由 / 渠道 / 直连">
+              #{u.route_id || 0} / #{u.channel_id || 0} / #{u.gateway_provider_id || 0}
             </DetailItem>
-            <DetailItem label="路由 ID">{u.route_id ? `#${u.route_id}` : "—"}</DetailItem>
+            {u.cooldown_until ? <DetailItem label="路由冷却至">{fullDateTime(u.cooldown_until)}</DetailItem> : null}
           </DetailSection>
 
-          <DetailSection title="用量与费用">
-            <DetailItem label="输入（不含缓存）">{formatTokens(u.input_tokens)}</DetailItem>
+          <DetailSection title="Token">
+            <DetailItem label="合计">{totalTokens(u).toLocaleString("en-US")}</DetailItem>
+            <DetailItem label="输入（不含缓存）">{(u.input_tokens || 0).toLocaleString("en-US")}</DetailItem>
             <DetailItem label="输出">
-              {formatTokens(u.output_tokens)}
-              {(u.reasoning_tokens ?? 0) > 0 ? `（推理 ${formatTokens(u.reasoning_tokens)}）` : ""}
+              {(u.output_tokens || 0).toLocaleString("en-US")}
+              {(u.reasoning_tokens ?? 0) > 0 ? `（推理 ${u.reasoning_tokens!.toLocaleString("en-US")}）` : ""}
             </DetailItem>
             <DetailItem label="缓存读取">
-              {formatTokens(u.cache_read_tokens)}
+              {(u.cache_read_tokens || 0).toLocaleString("en-US")}
               {hit != null ? `（命中 ${(hit * 100).toFixed(1)}%）` : ""}
             </DetailItem>
-            <DetailItem label="缓存写入">{formatTokens(u.cache_creation_tokens)}</DetailItem>
+            <DetailItem label="缓存写入">{(u.cache_creation_tokens || 0).toLocaleString("en-US")}</DetailItem>
+            <DetailItem label="缓存写 5m / 1h">
+              {(u.cache_creation_5m_tokens ?? 0).toLocaleString("en-US")} / {(u.cache_creation_1h_tokens ?? 0).toLocaleString("en-US")}
+            </DetailItem>
+            <DetailItem label="图像输出">{(u.image_output_tokens ?? 0).toLocaleString("en-US")}</DetailItem>
+          </DetailSection>
+
+          <DetailSection title="费用">
             <DetailItem label="实收">
               <span className="font-medium text-green-600 dark:text-green-400">{money6(actual)}</span>
             </DetailItem>
             <DetailItem label="标准费用">{money6(standard)}</DetailItem>
-            <DetailItem label="倍率 / 计费倍率">
-              {(u.rate_multiplier || 1).toFixed(4)}x / {(u.billing_rate_multiplier || 1).toFixed(4)}x
-            </DetailItem>
-            <DetailItem label="分项">
-              入 {money6(u.input_cost)} · 出 {money6(u.output_cost)}
-              {u.cache_read_cost > 0 ? ` · 缓存读 ${money6(u.cache_read_cost)}` : ""}
-              {u.cache_creation_cost > 0 ? ` · 缓存写 ${money6(u.cache_creation_cost)}` : ""}
-            </DetailItem>
+            <DetailItem label="实际倍率">{standard > 0 ? multiplierText(actual / standard) : "—"}</DetailItem>
+            <DetailItem label="计费倍率">{multiplierText(u.billing_rate_multiplier || 1)}</DetailItem>
+            <DetailItem label="倍率">{multiplierText(u.rate_multiplier || 1)}</DetailItem>
+            <DetailItem label="账号倍率">{multiplierText(u.account_rate_multiplier ?? 1)}</DetailItem>
+            <DetailItem label="输入">{money6(u.input_cost)}</DetailItem>
+            <DetailItem label="输出">{money6(u.output_cost)}</DetailItem>
+            <DetailItem label="缓存读取">{money6(u.cache_read_cost)}</DetailItem>
+            <DetailItem label="缓存写入">{money6(u.cache_creation_cost)}</DetailItem>
+            <DetailItem label="图像">{money6(u.image_output_cost ?? 0)}</DetailItem>
+            <DetailItem label="账号统计">{money6(u.account_stats_cost ?? 0)}</DetailItem>
           </DetailSection>
 
           <DetailSection title="性能与客户端">
             <DetailItem label="首字">{formatDurationMS(u.first_token_ms)}</DetailItem>
+            <DetailItem label="生成">{gen != null ? formatDurationMS(gen) : "—"}</DetailItem>
             <DetailItem label="总耗时">{formatDurationMS(u.duration_ms)}</DetailItem>
-            <DetailItem label="输出速度">
-              {speed != null ? `${speed.toFixed(1)} tok/s` : "—"}
-            </DetailItem>
+            <DetailItem label="输出速度">{speed != null ? `${speed.toFixed(1)} tok/s` : "—"}</DetailItem>
             <DetailItem label="IP" mono>{u.ip_address || "—"}</DetailItem>
-            <div className="col-span-2">
+            <div className="col-span-2 sm:col-span-3">
               <DetailItem label="User-Agent" mono>{u.user_agent || "—"}</DetailItem>
             </div>
           </DetailSection>
@@ -1608,451 +1552,30 @@ function UsageDetailSheet({
               errorOpen={errorOpen}
               onToggleError={(id) => setErrorOpen((prev) => ({ ...prev, [id]: !prev[id] }))}
             />
-          ) : showError ? (
-            <ErrorDetailPanel u={u} />
           ) : null}
+
+          <section className="space-y-2">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                onClick={() => setRawOpen((v) => !v)}
+              >
+                {rawOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                原始数据（JSON）
+              </button>
+              <Button type="button" size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => void copyText("原始数据", raw)}>
+                <Copy className="size-3" /> 复制
+              </Button>
+            </div>
+            {rawOpen ? (
+              <pre className="max-h-80 overflow-auto rounded-md border bg-muted/30 p-2 font-mono text-[11px] leading-4">{raw}</pre>
+            ) : null}
+          </section>
         </div>
       </SheetContent>
     </Sheet>
   )
-}
-
-/* ───────────── 详细视图：每条请求一张卡片，全部字段直接可见（不藏进 tooltip / 抽屉） ───────────── */
-
-/** 左侧状态色条：成功 / 失败 / 客户端断开 / 经过重试顺延 */
-function stripeClass(u: GatewayUsageLog, hasChain: boolean) {
-  if (isClientDisconnectResult(u)) return "border-l-warning"
-  if (!u.success) return "border-l-danger"
-  if (hasChain) return "border-l-violet-500"
-  return "border-l-success"
-}
-
-function KV({
-  label,
-  children,
-  mono,
-  muted,
-}: {
-  label: string
-  children: React.ReactNode
-  mono?: boolean
-  muted?: boolean
-}) {
-  return (
-    <>
-      <dt className="whitespace-nowrap text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          "min-w-0 break-words tabular-nums",
-          mono && "font-mono text-[11px] [overflow-wrap:anywhere]",
-          muted ? "text-muted-foreground" : "text-foreground",
-        )}
-      >
-        {children}
-      </dd>
-    </>
-  )
-}
-
-function DetailBlock({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
-  return (
-    <section className={cn("min-w-0 space-y-2", className)}>
-      <h4 className="text-[11px] font-medium tracking-wide text-muted-foreground">{title}</h4>
-      {children}
-    </section>
-  )
-}
-
-function KVList({ children }: { children: React.ReactNode }) {
-  return <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">{children}</dl>
-}
-
-/** Token 构成条：输入 / 缓存读 / 缓存写 / 输出 / 图像，宽度按占比 */
-function TokenMixBar({ u }: { u: GatewayUsageLog }) {
-  const parts = [
-    { v: u.input_tokens || 0, cls: "bg-emerald-500", label: "输入" },
-    { v: u.cache_read_tokens || 0, cls: "bg-sky-500", label: "缓存读" },
-    { v: u.cache_creation_tokens || 0, cls: "bg-amber-500", label: "缓存写" },
-    { v: u.output_tokens || 0, cls: "bg-violet-500", label: "输出" },
-    { v: u.image_output_tokens || 0, cls: "bg-pink-500", label: "图像" },
-  ]
-  const total = parts.reduce((a, p) => a + p.v, 0)
-  if (total <= 0) return <div className="h-1.5 rounded-full bg-muted" />
-  return (
-    <div className="flex h-1.5 overflow-hidden rounded-full bg-muted">
-      {parts
-        .filter((p) => p.v > 0)
-        .map((p) => (
-          <div
-            key={p.label}
-            className={p.cls}
-            style={{ width: `${(p.v / total) * 100}%` }}
-            title={`${p.label} ${formatTokens(p.v)}（${((p.v / total) * 100).toFixed(1)}%）`}
-          />
-        ))}
-    </div>
-  )
-}
-
-/** 耗时时间轴：首字前的等待 + 生成阶段，按总耗时比例 */
-function LatencyTimeline({ u }: { u: GatewayUsageLog }) {
-  const total = u.duration_ms || 0
-  if (total <= 0) return <div className="h-1.5 rounded-full bg-muted" />
-  const ft = u.first_token_ms ?? null
-  const waitPct = ft != null ? Math.min(100, (ft / total) * 100) : 100
-  const fSev = ft != null ? firstTokenSeverity(ft) : durationSeverity(total)
-  return (
-    <div className="flex h-1.5 overflow-hidden rounded-full bg-muted" title="首字前等待 | 生成">
-      <div className={cn(LATENCY_BAR[fSev], "opacity-90")} style={{ width: `${waitPct}%` }} />
-      {ft != null ? <div className="bg-primary/60" style={{ width: `${100 - waitPct}%` }} /> : null}
-    </div>
-  )
-}
-
-function multiplierText(v?: number | null) {
-  if (v == null || !Number.isFinite(v)) return "—"
-  return `${v.toFixed(v >= 10 ? 2 : 4).replace(/0+$/, "").replace(/\.$/, "")}x`
-}
-
-function UsageDetailRow({
-  u,
-  chain,
-  chainExpanded,
-  onToggleChain,
-  errorOpen,
-  onToggleError,
-  onOpen,
-}: {
-  u: GatewayUsageLog
-  chain?: GatewayUsageLog[]
-  chainExpanded: boolean
-  onToggleChain: () => void
-  errorOpen: Record<number, boolean>
-  onToggleError: (id: number) => void
-  onOpen: () => void
-}) {
-  const steps = mappingSteps(u)
-  const chainTotal = chain?.length ?? 1
-  const hasChain = chainTotal > 1
-  const chainIndex = hasChain ? chain!.findIndex((r) => r.id === u.id) + 1 : undefined
-  const reqID = (u.request_id || "").trim()
-  const d = new Date(u.created_at)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  const hit = cacheHitRate(u)
-  const speed = outputSpeed(u)
-  const standard = u.total_cost || 0
-  const actual = u.actual_cost || 0
-  const effectiveMul = standard > 0 ? actual / standard : null
-  const effort = (u.reasoning_effort || "").trim()
-  const tier = (u.service_tier || "").trim()
-  const sg = formatSourceGroupDisplay(u.source_group_name)
-  const inbound = u.inbound_endpoint?.trim() || "—"
-  const upstream = u.upstream_endpoint?.trim() || "—"
-  const isFail = !u.success && !isClientDisconnectResult(u)
-  const showError = (isFail || isClientDisconnectResult(u)) && (u.error_message || hasErrorDetail(u))
-  const errOpen = !!errorOpen[u.id]
-  const gen = u.first_token_ms != null ? Math.max(0, (u.duration_ms || 0) - u.first_token_ms) : null
-
-  return (
-    <article
-      className={cn(
-        "overflow-hidden rounded-lg border border-l-[3px] border-border bg-card shadow-xs transition-shadow hover:shadow-sm",
-        stripeClass(u, hasChain),
-      )}
-    >
-      {/* 身份行：结果 · 时间 · Request ID · 实收（本行最重要的数字） */}
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border/70 bg-muted/35 px-3 py-2">
-        <div className="flex items-center gap-1.5">
-          <ResultBadge u={u} />
-          {u.status_code > 0 ? (
-            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">HTTP {u.status_code}</span>
-          ) : null}
-          <AttemptBadge u={u} chainTotal={hasChain ? chainTotal : undefined} chainIndex={chainIndex} />
-          {!u.success && u.error_type && u.error_type !== "client" ? (
-            <span className={cn(CHIP, "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200")}>
-              {errorTypeLabel(u.error_type)}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex items-baseline gap-2" title={fullDateTime(u.created_at)}>
-          {Number.isNaN(d.getTime()) ? null : (
-            <>
-              <span className="font-mono text-sm font-medium tabular-nums">
-                {pad(d.getHours())}:{pad(d.getMinutes())}:{pad(d.getSeconds())}
-              </span>
-              <span className="text-[11px] text-muted-foreground">
-                {d.getFullYear()}/{pad(d.getMonth() + 1)}/{pad(d.getDate())} · {relativeTime(u.created_at)}
-              </span>
-            </>
-          )}
-        </div>
-        {reqID ? (
-          <button
-            type="button"
-            className="inline-flex min-w-0 items-center gap-1 rounded px-1 font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-            title="复制 Request ID"
-            onClick={() => void copyText("Request ID", reqID)}
-          >
-            <span className="truncate">{reqID}</span>
-            <Copy className="size-3 shrink-0" />
-          </button>
-        ) : null}
-        <div className="ml-auto flex items-center gap-3">
-          <div className="text-right leading-tight">
-            <div className="text-[10px] text-muted-foreground">实收</div>
-            <div
-              className={cn(
-                "font-mono text-base font-semibold tabular-nums",
-                actual > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
-              )}
-            >
-              {money6(actual)}
-            </div>
-          </div>
-          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={onOpen}>
-            详情
-          </Button>
-        </div>
-      </header>
-
-      {/* 五个信息块：模型与请求 / 路由 / Token / 费用 / 性能 */}
-      <div className="grid gap-x-6 gap-y-4 px-3 py-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1.1fr)_minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,0.95fr)]">
-        <DetailBlock title="模型与请求">
-          <div className="space-y-0.5">
-            <div className="font-mono text-sm font-semibold [overflow-wrap:anywhere]">{steps[0]}</div>
-            {steps.slice(1).map((step, i) => (
-              <div key={`${u.id}-s-${i}`} className="font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
-                ↳ {step}
-              </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-1">
-            <span
-              className={cn(
-                CHIP,
-                effort
-                  ? "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200"
-                  : "bg-muted text-muted-foreground",
-              )}
-              title="推理强度"
-            >
-              推理 {effort ? formatReasoningEffort(effort) : "未指定"}
-            </span>
-            <span className={cn(CHIP, requestTypeClass(u))}>{requestTypeLabel(u)}</span>
-            <span className={cn(CHIP, billingModeClass(u.billing_mode))}>{billingModeLabel(u.billing_mode)}</span>
-            {tier ? (
-              <span className={cn(CHIP, "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200")} title="服务档位">
-                档位 {tier}
-              </span>
-            ) : null}
-            {u.protocol_converted ? (
-              <span className={cn(CHIP, "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200")}>
-                协议转换
-              </span>
-            ) : null}
-          </div>
-          <KVList>
-            <KV label="入站" mono>{inbound}</KV>
-            <KV label="上游" mono muted={upstream === inbound}>{upstream}</KV>
-            <KV label="协议" mono>
-              {u.inbound_protocol || "—"} → {u.upstream_protocol || "—"}
-            </KV>
-          </KVList>
-        </DetailBlock>
-
-        <DetailBlock title="路由">
-          <KVList>
-            <KV label="密钥">
-              <span className="font-medium">{u.gateway_key_name || "—"}</span>
-              {u.gateway_key_id ? <span className="ml-1 text-muted-foreground">#{u.gateway_key_id}</span> : null}
-            </KV>
-            <KV label="网关组">
-              {u.gateway_group_name || "—"}
-              {u.gateway_group_id ? <span className="ml-1 text-muted-foreground">#{u.gateway_group_id}</span> : null}
-            </KV>
-            <KV label="上游账户">
-              <span className="font-medium">{accountLabel(u)}</span>
-              <span className="ml-1 text-muted-foreground">
-                {u.provider_name || u.gateway_provider_id ? "直连" : u.channel_id ? `渠道 #${u.channel_id}` : ""}
-              </span>
-            </KV>
-            <KV label="上游密钥">{u.source_api_key_name || "—"}</KV>
-            <KV label="源分组">{sg.label || "—"}</KV>
-            <KV label="路由" muted>{u.route_id ? `#${u.route_id}` : "—"}</KV>
-          </KVList>
-        </DetailBlock>
-
-        <DetailBlock title="Token">
-          <div className="flex items-baseline gap-2">
-            <span className="text-lg font-semibold tabular-nums">{formatTokens(totalTokens(u))}</span>
-            <span className="text-[11px] tabular-nums text-muted-foreground">
-              {totalTokens(u).toLocaleString("en-US")} 合计
-            </span>
-          </div>
-          <TokenMixBar u={u} />
-          <KVList>
-            <KV label="输入">
-              <span className="text-emerald-700 dark:text-emerald-400">{formatTokens(u.input_tokens)}</span>
-              <span className="ml-1 text-muted-foreground">不含缓存</span>
-            </KV>
-            <KV label="缓存读">
-              <span className="text-sky-700 dark:text-sky-400">{formatTokens(u.cache_read_tokens)}</span>
-              {hit != null ? <span className="ml-1 text-muted-foreground">命中 {(hit * 100).toFixed(1)}%</span> : null}
-            </KV>
-            <KV label="缓存写">
-              <span className="text-amber-700 dark:text-amber-400">{formatTokens(u.cache_creation_tokens)}</span>
-              {(u.cache_creation_5m_tokens ?? 0) > 0 || (u.cache_creation_1h_tokens ?? 0) > 0 ? (
-                <span className="ml-1 text-muted-foreground">
-                  5m {formatTokens(u.cache_creation_5m_tokens)} · 1h {formatTokens(u.cache_creation_1h_tokens)}
-                </span>
-              ) : null}
-            </KV>
-            <KV label="输出">
-              <span className="text-violet-700 dark:text-violet-400">{formatTokens(u.output_tokens)}</span>
-              {(u.reasoning_tokens ?? 0) > 0 ? (
-                <span className="ml-1 text-muted-foreground">含推理 {formatTokens(u.reasoning_tokens)}</span>
-              ) : null}
-            </KV>
-            {(u.image_output_tokens ?? 0) > 0 ? (
-              <KV label="图像">
-                <span className="text-pink-700 dark:text-pink-400">{formatTokens(u.image_output_tokens)}</span>
-              </KV>
-            ) : null}
-          </KVList>
-        </DetailBlock>
-
-        <DetailBlock title="费用">
-          <KVList>
-            <KV label="标准">{money6(standard)}</KV>
-            <KV label="实际倍率">
-              <span className={cn(effectiveMul != null && effectiveMul < 1 && "text-orange-600 dark:text-orange-400")}>
-                {effectiveMul != null ? multiplierText(effectiveMul) : "—"}
-              </span>
-            </KV>
-            <KV label="计费倍率" muted>{multiplierText(u.billing_rate_multiplier || 1)}</KV>
-            <KV label="倍率" muted>{multiplierText(u.rate_multiplier || 1)}</KV>
-            {u.account_rate_multiplier != null && u.account_rate_multiplier !== 1 ? (
-              <KV label="账号倍率" muted>{multiplierText(u.account_rate_multiplier)}</KV>
-            ) : null}
-          </KVList>
-          <div className="space-y-0.5 border-t border-dashed border-border pt-1.5 text-[11px] tabular-nums text-muted-foreground">
-            <div className="flex justify-between gap-2"><span>输入</span><span>{money6(u.input_cost)}</span></div>
-            <div className="flex justify-between gap-2"><span>输出</span><span>{money6(u.output_cost)}</span></div>
-            <div className="flex justify-between gap-2"><span>缓存读</span><span>{money6(u.cache_read_cost)}</span></div>
-            <div className="flex justify-between gap-2"><span>缓存写</span><span>{money6(u.cache_creation_cost)}</span></div>
-            {(u.image_output_cost ?? 0) > 0 ? (
-              <div className="flex justify-between gap-2"><span>图像</span><span>{money6(u.image_output_cost)}</span></div>
-            ) : null}
-            {(u.account_stats_cost ?? 0) > 0 ? (
-              <div className="flex justify-between gap-2"><span>账号统计</span><span>{money6(u.account_stats_cost)}</span></div>
-            ) : null}
-          </div>
-        </DetailBlock>
-
-        <DetailBlock title="性能">
-          <div className="flex items-baseline gap-2">
-            <span className={cn("text-lg font-semibold tabular-nums", LATENCY_TEXT[durationSeverity(u.duration_ms ?? 0)])}>
-              {formatDurationMS(u.duration_ms)}
-            </span>
-            <span className="text-[11px] text-muted-foreground">总耗时</span>
-          </div>
-          <LatencyTimeline u={u} />
-          <KVList>
-            <KV label="首字">
-              {u.first_token_ms != null ? (
-                <span className={LATENCY_TEXT[firstTokenSeverity(u.first_token_ms)]}>{formatDurationMS(u.first_token_ms)}</span>
-              ) : (
-                "—"
-              )}
-            </KV>
-            <KV label="生成">{gen != null ? formatDurationMS(gen) : "—"}</KV>
-            <KV label="速度">{speed != null ? `${speed >= 100 ? speed.toFixed(0) : speed.toFixed(1)} tok/s` : "—"}</KV>
-          </KVList>
-        </DetailBlock>
-      </div>
-
-      {/* 错误：完整原文直接显示，上游 body / header 等大字段点开再拉 */}
-      {showError ? (
-        <div
-          className={cn(
-            "space-y-2 border-t px-3 py-2.5",
-            isFail
-              ? "border-red-200/70 bg-red-50/60 dark:border-red-900/40 dark:bg-red-950/20"
-              : "border-amber-200/70 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20",
-          )}
-        >
-          <div className="flex flex-wrap items-start gap-2">
-            <p
-              className={cn(
-                "min-w-0 flex-1 whitespace-pre-wrap text-xs [overflow-wrap:anywhere]",
-                isFail ? "text-red-800 dark:text-red-200" : "text-amber-900 dark:text-amber-200",
-              )}
-            >
-              {u.error_message || (isFail ? "请求失败（无错误摘要）" : "客户端在流式响应过程中关闭连接")}
-            </p>
-            {hasErrorDetail(u) ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-6 shrink-0 px-2 text-[11px]"
-                onClick={() => onToggleError(u.id)}
-              >
-                {errOpen ? "收起上游详情" : "上游 body / header"}
-              </Button>
-            ) : null}
-          </div>
-          {u.upstream_url ? (
-            <div className="font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">{u.upstream_url}</div>
-          ) : null}
-          {errOpen ? <ErrorDetailPanel u={u} /> : null}
-        </div>
-      ) : null}
-
-      {hasChain ? (
-        <div className="border-t border-border/70 px-3 py-2">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 text-xs font-medium text-violet-700 hover:underline dark:text-violet-300"
-            onClick={onToggleChain}
-          >
-            {chainExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-            同一请求共 {chainTotal} 次尝试（重试 / 顺延链路）
-          </button>
-          {chainExpanded ? (
-            <div className="mt-2">
-              <ChainTimeline rows={chain!} errorOpen={errorOpen} onToggleError={onToggleError} />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* 客户端信息：完整显示，不截断 */}
-      <footer className="flex flex-wrap gap-x-5 gap-y-1 border-t border-border/70 px-3 py-1.5 text-[11px] text-muted-foreground">
-        <span>
-          IP <span className="font-mono text-foreground/80">{u.ip_address || "—"}</span>
-        </span>
-        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-          UA <span className="font-mono text-foreground/80">{u.user_agent?.trim() || "—"}</span>
-        </span>
-        {u.cooldown_until ? (
-          <span className="text-amber-700 dark:text-amber-400">路由冷却至 {fullDateTime(u.cooldown_until)}</span>
-        ) : null}
-        <span className="font-mono">#{u.id}</span>
-      </footer>
-    </article>
-  )
-}
-
-const USAGE_VIEW_STORAGE_KEY = "gateway-usage-view-v1"
-type UsageView = "detail" | "table"
-
-function loadUsageView(): UsageView {
-  try {
-    return window.localStorage.getItem(USAGE_VIEW_STORAGE_KEY) === "table" ? "table" : "detail"
-  } catch {
-    return "detail"
-  }
 }
 
 export function GatewayUsageTable({
@@ -2069,28 +1592,11 @@ export function GatewayUsageTable({
   const [chainOpen, setChainOpen] = useState<Record<string, boolean>>({})
   const [cleanupOpen, setCleanupOpen] = useState(false)
   const [detailRow, setDetailRow] = useState<GatewayUsageLog | null>(null)
-  const [view, setView] = useState<UsageView>(() => loadUsageView())
-  const changeView = (v: UsageView) => {
-    setView(v)
-    try {
-      window.localStorage.setItem(USAGE_VIEW_STORAGE_KEY, v)
-    } catch {
-      /* ignore */
-    }
-  }
-  const [colVisible, setColVisible] = useState<UsageColVisibility>(() =>
-    loadUsageColVisibility(),
-  )
+  const [colVisible, setColVisible] = useState<UsageColVisibility>(() => loadUsageColVisibility())
 
-  const show = useCallback(
-    (id: UsageColId) => colVisible[id] !== false,
-    [colVisible],
-  )
+  const show = useCallback((id: UsageColId) => colVisible[id] !== false, [colVisible])
 
-  const visibleCount = useMemo(
-    () => USAGE_COLUMNS.filter((c) => colVisible[c.id]).length,
-    [colVisible],
-  )
+  const visibleCount = useMemo(() => USAGE_COLUMNS.filter((c) => colVisible[c.id]).length, [colVisible])
   // 展开箭头列 + 可见数据列
   const colSpan = 1 + visibleCount
 
@@ -2143,143 +1649,99 @@ export function GatewayUsageTable({
       seenReq.add(rid)
       const chain = chainByReq.get(rid)!
       // 主行 = 最终成功，否则最后一次尝试
-      const final =
-        [...chain].reverse().find((r) => r.success) || chain[chain.length - 1]
+      const final = [...chain].reverse().find((r) => r.success) || chain[chain.length - 1]
       mainRows.push(final)
     } else {
       mainRows.push(u)
     }
   }
 
+  const head = (id: UsageColId, label: string) =>
+    show(id) ? (
+      <TableHead key={id} className="whitespace-nowrap text-xs font-medium text-muted-foreground">
+        {label}
+      </TableHead>
+    ) : null
+
   return (
     <TooltipProvider delayDuration={200}>
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex rounded-md border bg-card p-0.5" role="tablist" aria-label="列表视图">
-            {(
-              [
-                { id: "detail", label: "详细", icon: Rows3, tip: "每条请求一张卡片，全部字段直接显示" },
-                { id: "table", label: "表格", icon: TableIcon, tip: "紧凑表格，适合快速扫读" },
-              ] as const
-            ).map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                role="tab"
-                aria-selected={view === o.id}
-                title={o.tip}
-                onClick={() => changeView(o.id)}
-                className={cn(
-                  "inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs transition-colors",
-                  view === o.id
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
-              >
-                <o.icon className="size-3.5" />
-                {o.label}
-              </button>
-            ))}
-          </div>
+          <p className="text-xs text-muted-foreground">
+            悬停 Token / 费用 / 延迟查看明细，点击行查看全部字段
+          </p>
           <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 gap-1.5 text-muted-foreground hover:text-destructive"
-            onClick={() => setCleanupOpen(true)}
-          >
-            <Trash2 className="size-3.5" />
-            清理
-          </Button>
-          {view === "table" ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5">
-                <Columns3 className="size-3.5" />
-                列显示
-                <span className="tabular-nums text-muted-foreground">
-                  {visibleCount}/{USAGE_COLUMNS.length}
-                </span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel>选择展示列</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {USAGE_COLUMNS.map((col) => (
-                <DropdownMenuCheckboxItem
-                  key={col.id}
-                  checked={colVisible[col.id]}
-                  onCheckedChange={(checked) =>
-                    toggleCol(col.id, checked === true)
-                  }
-                  onSelect={(e) => e.preventDefault()}
-                >
-                  {col.label}
-                </DropdownMenuCheckboxItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={resetCols}>恢复默认</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 text-muted-foreground hover:text-destructive"
+              onClick={() => setCleanupOpen(true)}
+            >
+              <Trash2 className="size-3.5" />
+              清理
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5">
+                  <Columns3 className="size-3.5" />
+                  列显示
+                  <span className="tabular-nums text-muted-foreground">
+                    {visibleCount}/{USAGE_COLUMNS.length}
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuLabel>选择展示列</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {USAGE_COLUMNS.map((col) => (
+                  <DropdownMenuCheckboxItem
+                    key={col.id}
+                    checked={colVisible[col.id]}
+                    onCheckedChange={(checked) => toggleCol(col.id, checked === true)}
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    {col.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={resetCols}>恢复默认</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
-        <UsageCleanupDialog
-          open={cleanupOpen}
-          onOpenChange={setCleanupOpen}
-          onCleaned={onCleaned}
-        />
+        <UsageCleanupDialog open={cleanupOpen} onOpenChange={setCleanupOpen} onCleaned={onCleaned} />
 
         <UsageDetailSheet
           u={detailRow}
-          chain={
-            detailRow?.request_id
-              ? chainByReq.get(detailRow.request_id.trim())
-              : undefined
-          }
+          chain={detailRow?.request_id ? chainByReq.get(detailRow.request_id.trim()) : undefined}
           onOpenChange={(open) => {
             if (!open) setDetailRow(null)
           }}
         />
 
-        {view === "detail" ? (
-          <div className="space-y-2.5">
-            {mainRows.map((u) => {
-              const rid = (u.request_id || "").trim()
-              const chain = rid ? chainByReq.get(rid) : undefined
-              return (
-                <UsageDetailRow
-                  key={u.id}
-                  u={u}
-                  chain={chain}
-                  chainExpanded={!!chainOpen[rid]}
-                  onToggleChain={() => setChainOpen((prev) => ({ ...prev, [rid]: !prev[rid] }))}
-                  errorOpen={errorOpen}
-                  onToggleError={(id) => setErrorOpen((prev) => ({ ...prev, [id]: !prev[id] }))}
-                  onOpen={() => setDetailRow(u)}
-                />
-              )
-            })}
-            {mainRows.length === 0 ? (
-              <div className="rounded-lg border border-dashed bg-card py-14 text-center text-sm text-muted-foreground">
-                {emptyText}
-              </div>
-            ) : null}
-          </div>
-        ) : (
-        /* 表格自身滚动（横向 + 纵向），表头吸顶；内层 table 容器不再单独滚动 */
-        <div className="max-h-[calc(100vh-12rem)] overflow-auto rounded-md border bg-card [&>[data-slot=table-container]]:overflow-visible">
+        {/* 表格自身滚动（横向 + 纵向），表头吸顶；内层 table 容器不再单独滚动 */}
+        <div className="max-h-[calc(100vh-12rem)] overflow-auto rounded-lg border bg-card [&>[data-slot=table-container]]:overflow-visible">
           <Table className="w-max min-w-full">
-            <TableHeader className="sticky top-0 z-10 bg-background shadow-[inset_0_-1px_0_var(--border)]">
+            <TableHeader className="sticky top-0 z-10 bg-muted/60 backdrop-blur supports-[backdrop-filter]:bg-muted/50">
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-10 whitespace-nowrap" />
-                {USAGE_COLUMNS.filter((c) => show(c.id)).map((c) => (
-                  <TableHead key={c.id} className="whitespace-nowrap text-xs">
-                    {c.label}
-                  </TableHead>
-                ))}
+                {head("status", "状态")}
+                {head("key", "API 密钥")}
+                {head("account", "账户")}
+                {head("model", "模型")}
+                {head("reasoning", "推理强度")}
+                {head("endpoint", "端点")}
+                {head("group", "分组")}
+                {head("type", "类型")}
+                {head("billing", "计费模式")}
+                {head("token", "Token")}
+                {head("cost", "费用")}
+                {head("latency", "延迟")}
+                {head("ip", "IP")}
+                {head("time", "时间")}
+                {head("userAgent", "User-Agent")}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -2287,15 +1749,10 @@ export function GatewayUsageTable({
                 const rid = (u.request_id || "").trim()
                 const chain = rid ? chainByReq.get(rid) : undefined
                 const chainTotal = chain?.length ?? 1
-                const chainIndex =
-                  chain && chainTotal > 1
-                    ? chain.findIndex((r) => r.id === u.id) + 1
-                    : undefined
+                const chainIndex = chain && chainTotal > 1 ? chain.findIndex((r) => r.id === u.id) + 1 : undefined
                 const hasChain = chainTotal > 1
                 const chainExpanded = hasChain && !!chainOpen[rid]
-                const canError =
-                  hasErrorDetail(u) &&
-                  (!u.success || isClientDisconnectResult(u))
+                const canError = hasErrorDetail(u) && (!u.success || isClientDisconnectResult(u))
                 const errExpanded = !!errorOpen[u.id]
                 // 单箭头：有链路优先展开链路；无链路且有错误则展开错误
                 const showToggle = hasChain || canError
@@ -2305,13 +1762,9 @@ export function GatewayUsageTable({
                   <Fragment key={u.id}>
                     <TableRow
                       className={cn(
-                        "cursor-pointer align-top",
-                        !u.success &&
-                          !isClientDisconnectResult(u) &&
-                          "bg-red-50/40 dark:bg-red-950/10",
-                        isClientDisconnectResult(u) &&
-                          "bg-amber-50/40 dark:bg-amber-950/10",
-                        hasChain && "border-l-2 border-l-violet-400/80",
+                        "cursor-pointer",
+                        !u.success && !isClientDisconnectResult(u) && "bg-red-50/50 hover:bg-red-50 dark:bg-red-950/15 dark:hover:bg-red-950/25",
+                        isClientDisconnectResult(u) && "bg-amber-50/50 hover:bg-amber-50 dark:bg-amber-950/15 dark:hover:bg-amber-950/25",
                       )}
                       onClick={(e) => {
                         // 行内按钮 / 链接 / 选中文本时不打开详情
@@ -2325,12 +1778,7 @@ export function GatewayUsageTable({
                         {showToggle ? (
                           <button
                             type="button"
-                            className={cn(
-                              "inline-flex size-7 items-center justify-center rounded",
-                              hasChain
-                                ? "text-violet-600 hover:bg-violet-100 dark:text-violet-300 dark:hover:bg-violet-950/40"
-                                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                            )}
+                            className="inline-flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                             title={
                               hasChain
                                 ? rowOpen
@@ -2342,87 +1790,83 @@ export function GatewayUsageTable({
                             }
                             onClick={() => {
                               if (hasChain) {
-                                setChainOpen((prev) => ({
-                                  ...prev,
-                                  [rid]: !prev[rid],
-                                }))
+                                setChainOpen((prev) => ({ ...prev, [rid]: !prev[rid] }))
                               } else {
-                                setErrorOpen((prev) => ({
-                                  ...prev,
-                                  [u.id]: !prev[u.id],
-                                }))
+                                setErrorOpen((prev) => ({ ...prev, [u.id]: !prev[u.id] }))
                               }
                             }}
                           >
-                            {rowOpen ? (
-                              <ChevronDown className="size-4" />
-                            ) : (
-                              <ChevronRight className="size-4" />
-                            )}
+                            {rowOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
                           </button>
                         ) : (
                           <span className="inline-block size-7" />
                         )}
                       </TableCell>
 
-                      {show("time") && (
-                        <TableCell>
-                          <TimeCell u={u} />
-                        </TableCell>
-                      )}
-
                       {show("status") && (
                         <TableCell>
                           <StatusCell
                             u={u}
                             chainTotal={hasChain ? chainTotal : undefined}
-                            chainIndex={
-                              hasChain ? chainIndex || chainTotal : undefined
-                            }
+                            chainIndex={hasChain ? chainIndex || chainTotal : undefined}
                           />
-                          {hasChain && !chainExpanded ? (
-                            <button
-                              type="button"
-                              className="mt-1 text-[11px] text-violet-700 hover:underline dark:text-violet-300"
-                              onClick={() =>
-                                setChainOpen((prev) => ({ ...prev, [rid]: true }))
-                              }
-                            >
-                              查看全部 {chainTotal} 次尝试
-                            </button>
-                          ) : null}
                           {!u.success && !isClientDisconnectResult(u) && u.error_message ? (
-                            <div
-                              className="mt-1 max-w-[16rem] truncate text-[11px] text-red-700 dark:text-red-300"
-                              title={u.error_message}
-                            >
+                            <div className="mt-0.5 max-w-[14rem] truncate text-[11px] text-red-700 dark:text-red-300" title={u.error_message}>
                               {u.error_message}
                             </div>
                           ) : null}
                         </TableCell>
                       )}
 
-                      {show("model") && (
-                        <TableCell>
-                          <ModelCell u={u} />
-                        </TableCell>
-                      )}
-
                       {show("key") && (
-                        <TableCell>
-                          <KeyGroupCell u={u} />
+                        <TableCell className="text-sm">
+                          <CellText text={u.gateway_key_name || (u.gateway_key_id ? `#${u.gateway_key_id}` : "—")} className="font-medium" />
                         </TableCell>
                       )}
 
                       {show("account") && (
-                        <TableCell>
+                        <TableCell className="text-sm">
                           <AccountCell u={u} />
+                        </TableCell>
+                      )}
+
+                      {show("model") && (
+                        <TableCell className="text-xs">
+                          <ModelCell u={u} />
+                        </TableCell>
+                      )}
+
+                      {show("reasoning") && (
+                        <TableCell className="text-sm">
+                          <CellText text={formatReasoningEffort(u.reasoning_effort)} />
                         </TableCell>
                       )}
 
                       {show("endpoint") && (
                         <TableCell>
                           <EndpointCell u={u} />
+                        </TableCell>
+                      )}
+
+                      {show("group") && (
+                        <TableCell className="text-xs">
+                          <GroupCell u={u} />
+                        </TableCell>
+                      )}
+
+                      {show("type") && (
+                        <TableCell>
+                          <span className={cn("inline-flex items-center rounded px-2 py-0.5 text-xs font-medium", requestTypeClass(u))}>
+                            {requestTypeLabel(u)}
+                          </span>
+                        </TableCell>
+                      )}
+
+                      {show("billing") && (
+                        <TableCell>
+                          <span className={cn("inline-flex items-center rounded px-2 py-0.5 text-xs font-medium", billingModeClass(u.billing_mode))}>
+                            {billingModeLabel(u.billing_mode)}
+                          </span>
                         </TableCell>
                       )}
 
@@ -2450,12 +1894,17 @@ export function GatewayUsageTable({
                         </TableCell>
                       )}
 
+                      {show("time") && (
+                        <TableCell className="text-sm text-muted-foreground">
+                          <span className="whitespace-nowrap tabular-nums" title={relativeTime(u.created_at)}>
+                            {fullDateTime(u.created_at)}
+                          </span>
+                        </TableCell>
+                      )}
+
                       {show("userAgent") && (
                         <TableCell className="text-xs text-muted-foreground">
-                          <span
-                            className="block max-w-[16rem] truncate"
-                            title={u.user_agent || undefined}
-                          >
+                          <span className="block max-w-[16rem] truncate" title={u.user_agent || undefined}>
                             {u.user_agent?.trim() || "—"}
                           </span>
                         </TableCell>
@@ -2463,16 +1912,11 @@ export function GatewayUsageTable({
                     </TableRow>
                     {hasChain && chainExpanded ? (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={colSpan} className="bg-muted/15 p-3">
+                        <TableCell colSpan={colSpan} className="bg-muted/20 p-3">
                           <ChainTimeline
                             rows={chain!}
                             errorOpen={errorOpen}
-                            onToggleError={(id) =>
-                              setErrorOpen((prev) => ({
-                                ...prev,
-                                [id]: !prev[id],
-                              }))
-                            }
+                            onToggleError={(id) => setErrorOpen((prev) => ({ ...prev, [id]: !prev[id] }))}
                           />
                         </TableCell>
                       </TableRow>
@@ -2489,10 +1933,7 @@ export function GatewayUsageTable({
               })}
               {mainRows.length === 0 && (
                 <TableRow>
-                  <TableCell
-                    colSpan={colSpan}
-                    className="h-24 text-center text-muted-foreground"
-                  >
+                  <TableCell colSpan={colSpan} className="h-24 text-center text-muted-foreground">
                     {emptyText}
                   </TableCell>
                 </TableRow>
@@ -2500,7 +1941,6 @@ export function GatewayUsageTable({
             </TableBody>
           </Table>
         </div>
-        )}
       </div>
     </TooltipProvider>
   )

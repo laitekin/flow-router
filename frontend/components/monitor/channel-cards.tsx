@@ -89,14 +89,6 @@ function statusOf(c: Channel): Status {
   return "healthy"
 }
 
-// 卡片左侧状态色条：一眼找出有问题的渠道
-const statusAccent: Record<Status, string> = {
-  healthy: "border-l-success",
-  low: "border-l-warning",
-  failed: "border-l-danger",
-  idle: "border-l-border",
-}
-
 const statusMap: Record<Status, { label: string; cls: string }> = {
   healthy: { label: "健康", cls: "text-success bg-success/10" },
   low: { label: "低余额", cls: "text-warning bg-warning/10" },
@@ -870,8 +862,7 @@ export function ChannelCards() {
                 <Card
                   key={c.id}
                   className={cn(
-                    "flex flex-col gap-0 border border-l-[3px] border-border p-3 shadow-none transition-shadow hover:shadow-sm sm:p-4",
-                    statusAccent[status],
+                    "flex flex-col gap-0 border border-border p-3 shadow-none transition-shadow hover:shadow-sm sm:p-4",
                     !c.monitor_enabled && "opacity-75",
                   )}
                 >

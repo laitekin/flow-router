@@ -348,7 +348,7 @@ export function RoutesPanel({
                 className={cn(
                   "transition-colors duration-300",
                   highlightedRouteID === r.id &&
-                    "bg-primary/10 shadow-[inset_3px_0_0_hsl(var(--primary))] ring-1 ring-inset ring-primary/40",
+                    "bg-primary/10 ring-1 ring-inset ring-primary/40",
                 )}
               >
                 <TableCell className="text-center text-xs tabular-nums text-muted-foreground">
