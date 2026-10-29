@@ -30,3 +30,17 @@ func TestFilterModelRoutesKeepsLegacyEntriesUnrestricted(t *testing.T) {
 		t.Fatalf("legacy model should keep all routes: %#v", filtered)
 	}
 }
+
+func TestFilterModelRoutesRejectsForeignModel(t *testing.T) {
+	routes := []storage.GatewayRoute{{ID: 1}, {ID: 2}}
+	items := []ModelListItem{{ID: "gpt-6-sol", Sources: []ModelSource{{RouteID: 1}}}}
+	if got := filterRoutesForModel(routes, items, "deepseek-v4-flash"); len(got) != 0 {
+		t.Fatalf("foreign model reached GPT routes: %#v", got)
+	}
+	if got := filterRoutesForModel(routes, items, ""); len(got) != 2 {
+		t.Fatalf("model-less job polling was blocked: %#v", got)
+	}
+	if got := filterRoutesForModel(routes, nil, "legacy"); len(got) != 2 {
+		t.Fatalf("uncatalogued legacy group unexpectedly blocked: %#v", got)
+	}
+}

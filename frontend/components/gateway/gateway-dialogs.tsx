@@ -21,6 +21,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { BalancePolicyFields } from "./balance-policy-fields"
 import {
   Table,
   TableBody,
@@ -777,7 +778,7 @@ export function GroupFormDialog({
                 </p>
               </div>
               <div className="space-y-1">
-                <Label>失败冷却（秒）</Label>
+                <Label>普通失败冷却（秒）</Label>
                 <Input
                   type="number"
                   min={0}
@@ -789,7 +790,7 @@ export function GroupFormDialog({
                   }
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  路由失败后暂停调度时长，0 表示不冷却
+                  普通网络／模型故障的冷却起始时长，0 表示不冷却；余额不足单独配置。
                 </p>
               </div>
             </div>
@@ -829,8 +830,8 @@ export function GroupFormDialog({
               <div className="min-w-0 flex-1">
                 <Label>4xx 状态码顺延</Label>
                 <p className="text-[11px] leading-5 text-muted-foreground">
-                  默认仅网络错误、429、5xx 会重试/顺延。开启后 400/401/403/404
-                  等 4xx 也按上方策略重试与顺延。
+                  默认仅网络错误、429、5xx 会重试/顺延。开启后普通 400/401/403/404
+                  也按上方策略处理；明确的余额不足由下方专项开关控制。
                 </p>
               </div>
               <Switch
@@ -842,6 +843,7 @@ export function GroupFormDialog({
                 }
               />
             </div>
+            <BalancePolicyFields form={groupForm} onChange={setGroupForm} busy={busy} />
             <p className="rounded-md border border-amber-200/80 bg-amber-50/80 px-2 py-1.5 text-[11px] leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
               注意：顺延到其他渠道时，上游 prompt cache 通常无法命中，可能按全量输入重新计费；
               次数越多、触发越频繁，

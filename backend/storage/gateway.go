@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -199,6 +200,28 @@ func (r *GatewayGroups) FindByName(name string) (*GatewayGroup, error) {
 // Create 插入记录。
 func (r *GatewayGroups) Create(item *GatewayGroup) error { return r.db.Create(item).Error }
 
+// Admin has already resolved defaults. Preserve explicitly supplied false/zero
+// values instead of letting ORM default tags turn disabled policies back on.
+func (r *GatewayGroups) CreateWithRetryPolicy(item *GatewayGroup) error {
+	policy := map[string]any{
+		"retry_enabled": item.RetryEnabled, "retry_count": item.RetryCount,
+		"failover_enabled": item.FailoverEnabled, "failover_max": item.FailoverMax,
+		"failover_on4xx": item.FailoverOn4xx, "cooldown_seconds": item.CooldownSeconds,
+		"balance_failover_enabled":     item.BalanceFailoverEnabled,
+		"balance_cooldown_seconds":     item.BalanceCooldownSeconds,
+		"balance_cooldown_max_seconds": item.BalanceCooldownMaxSeconds,
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(item).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(item).Updates(policy).Error; err != nil {
+			return err
+		}
+		return tx.First(item, item.ID).Error
+	})
+}
+
 // Update 全量保存。
 func (r *GatewayGroups) Update(item *GatewayGroup) error { return r.db.Save(item).Error }
 
@@ -314,7 +337,10 @@ func (r *GatewayKeys) AddQuotaUsed(id uint, amount float64) error {
 }
 
 // GatewayRoutes 网关路由仓储。
-type GatewayRoutes struct{ db *gorm.DB }
+type GatewayRoutes struct {
+	db              *gorm.DB
+	modelCooldownMu sync.Mutex
+}
 
 // NewGatewayRoutes 构造网关路由仓储。
 func NewGatewayRoutes(db *gorm.DB) *GatewayRoutes { return &GatewayRoutes{db: db} }

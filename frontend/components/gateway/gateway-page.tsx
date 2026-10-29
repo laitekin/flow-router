@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
+import { balancePolicySchema } from "./balance-policy-form"
 import {
   Check,
   Copy,
@@ -861,6 +862,9 @@ export function GatewayPage() {
       failover_enabled: g.failover_enabled !== false,
       failover_max: String(g.failover_max ?? 8),
       failover_on_4xx: !!g.failover_on_4xx,
+      balance_failover_enabled: g.balance_failover_enabled !== false,
+      balance_cooldown_seconds: String(g.balance_cooldown_seconds ?? 300),
+      balance_cooldown_max_seconds: String(g.balance_cooldown_max_seconds ?? 1800),
       cooldown_seconds: String(g.cooldown_seconds ?? 30),
       first_token_timeout_sec: String(g.first_token_timeout_sec ?? 0),
       user_agent: g.user_agent ?? "",
@@ -872,6 +876,12 @@ export function GatewayPage() {
     const name = groupForm.name.trim()
     if (!name) {
       toast.error("请填写组名称")
+      return
+    }
+    const balancePolicy = balancePolicySchema.safeParse(groupForm)
+    if (!balancePolicy.success) {
+      toast.error(balancePolicy.error.issues[0].message)
+      document.getElementById(String(balancePolicy.error.issues[0].path[0]))?.focus()
       return
     }
     const retryCount = Math.max(0, Math.min(10, Number(groupForm.retry_count) || 0))
@@ -891,6 +901,8 @@ export function GatewayPage() {
       failover_enabled: groupForm.failover_enabled,
       failover_max: failoverMax,
       failover_on_4xx: groupForm.failover_on_4xx,
+      balance_failover_enabled: groupForm.balance_failover_enabled,
+      ...balancePolicy.data,
       cooldown_seconds: cooldownSeconds,
       first_token_timeout_sec: firstTokenTimeout,
       user_agent: groupForm.user_agent.trim(),

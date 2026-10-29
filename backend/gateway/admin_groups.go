@@ -38,6 +38,19 @@ func (a *AdminService) CreateGroup(in CreateGroupInput) (*storage.GatewayGroup, 
 		failoverOn4xx = *in.FailoverOn4xx
 	}
 	gwDefaults := a.gatewayRuntime()
+	balanceEnabled, balanceBase, balanceMax := true, 300, 1800
+	if in.BalanceFailoverEnabled != nil {
+		balanceEnabled = *in.BalanceFailoverEnabled
+	}
+	if in.BalanceCooldownSeconds != nil {
+		balanceBase = *in.BalanceCooldownSeconds
+	}
+	if in.BalanceCooldownMaxSeconds != nil {
+		balanceMax = *in.BalanceCooldownMaxSeconds
+	}
+	if err := validateBalanceCooldown(balanceBase, balanceMax); err != nil {
+		return nil, err
+	}
 	retryCount, failoverMax, cooldown := 0, gwDefaults.MaxFailoverSwitches, gwDefaults.TempPauseSeconds
 	if in.RetryCount != nil {
 		retryCount = *in.RetryCount
@@ -73,27 +86,30 @@ func (a *AdminService) CreateGroup(in CreateGroupInput) (*storage.GatewayGroup, 
 		return nil, err
 	}
 	item := &storage.GatewayGroup{
-		Name:                  name,
-		Description:           strings.TrimSpace(in.Description),
-		Position:              pos,
-		Status:                storage.GatewayGroupStatusActive,
-		RateSortDirection:     dir,
-		RateResortEnabled:     rateResort,
-		ModelMappingJSON:      strings.TrimSpace(in.ModelMappingJSON),
-		ModelsJSON:            strings.TrimSpace(in.ModelsJSON),
-		ModelsMode:            mode,
-		ServiceTierRulesJSON:  serviceTierRules,
-		SystemPromptRulesJSON: systemPromptRules,
-		RetryEnabled:          retryEnabled,
-		RetryCount:            retryCount,
-		FailoverEnabled:       failoverEnabled,
-		FailoverMax:           failoverMax,
-		FailoverOn4xx:         failoverOn4xx,
-		CooldownSeconds:       cooldown,
-		FirstTokenTimeoutSec:  ftTimeout,
-		UserAgent:             strings.TrimSpace(in.UserAgent),
+		Name:                      name,
+		Description:               strings.TrimSpace(in.Description),
+		Position:                  pos,
+		Status:                    storage.GatewayGroupStatusActive,
+		RateSortDirection:         dir,
+		RateResortEnabled:         rateResort,
+		ModelMappingJSON:          strings.TrimSpace(in.ModelMappingJSON),
+		ModelsJSON:                strings.TrimSpace(in.ModelsJSON),
+		ModelsMode:                mode,
+		ServiceTierRulesJSON:      serviceTierRules,
+		SystemPromptRulesJSON:     systemPromptRules,
+		RetryEnabled:              retryEnabled,
+		RetryCount:                retryCount,
+		FailoverEnabled:           failoverEnabled,
+		FailoverMax:               failoverMax,
+		FailoverOn4xx:             failoverOn4xx,
+		CooldownSeconds:           cooldown,
+		BalanceFailoverEnabled:    balanceEnabled,
+		BalanceCooldownSeconds:    balanceBase,
+		BalanceCooldownMaxSeconds: balanceMax,
+		FirstTokenTimeoutSec:      ftTimeout,
+		UserAgent:                 strings.TrimSpace(in.UserAgent),
 	}
-	if err := a.Groups.Create(item); err != nil {
+	if err := a.Groups.CreateWithRetryPolicy(item); err != nil {
 		return nil, err
 	}
 	return item, nil
@@ -178,6 +194,18 @@ func (a *AdminService) UpdateGroup(id uint, in UpdateGroupInput) (*storage.Gatew
 	}
 	if in.FailoverOn4xx != nil {
 		item.FailoverOn4xx = *in.FailoverOn4xx
+	}
+	if in.BalanceFailoverEnabled != nil {
+		item.BalanceFailoverEnabled = *in.BalanceFailoverEnabled
+	}
+	if in.BalanceCooldownSeconds != nil {
+		item.BalanceCooldownSeconds = *in.BalanceCooldownSeconds
+	}
+	if in.BalanceCooldownMaxSeconds != nil {
+		item.BalanceCooldownMaxSeconds = *in.BalanceCooldownMaxSeconds
+	}
+	if err := validateBalanceCooldown(item.BalanceCooldownSeconds, item.BalanceCooldownMaxSeconds); err != nil {
+		return nil, err
 	}
 	rc, fm, cd := item.RetryCount, item.FailoverMax, item.CooldownSeconds
 	if in.RetryCount != nil {
