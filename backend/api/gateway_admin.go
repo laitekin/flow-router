@@ -756,6 +756,8 @@ func parseUsageTime(v string) (time.Time, bool) {
 
 func listGatewayUsage(c *gin.Context, d *Deps) {
 	q := parseGatewayUsageQuery(c)
+	// 后台列表不带上游错误大字段，展开时走 /usage/detail/:id
+	q.OmitErrorPayload = true
 	page, err := d.GatewayUsage.List(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -788,8 +790,6 @@ func summaryGatewayUsage(c *gin.Context, d *Deps) {
 
 func statsGatewayUsage(c *gin.Context, d *Deps) {
 	q := parseGatewayUsageQuery(c)
-	// 后台不展示端点分布，跳过那次全量 GROUP BY
-	q.SkipEndpoints = true
 	stats, err := d.GatewayUsage.Stats(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

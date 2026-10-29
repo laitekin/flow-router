@@ -1758,7 +1758,18 @@ func TestGatewayUsageListOmitsErrorPayload(t *testing.T) {
 	}
 
 	from := now.Add(-time.Hour)
-	page, err := usage.List(GatewayUsageQuery{From: &from, Page: 1, PageSize: 50})
+	// 默认（公开 /v1/usage 等）带全部字段，行为与原来一致
+	full, err := usage.List(GatewayUsageQuery{From: &from, Page: 1, PageSize: 50})
+	if err != nil {
+		t.Fatalf("list full: %v", err)
+	}
+	for _, it := range full.Items {
+		if it.RequestID == "fail-1" && it.UpstreamErrorBody == "" {
+			t.Fatalf("default list must keep the error payload")
+		}
+	}
+
+	page, err := usage.List(GatewayUsageQuery{From: &from, Page: 1, PageSize: 50, OmitErrorPayload: true})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

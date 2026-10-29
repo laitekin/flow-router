@@ -1810,6 +1810,15 @@ export function GatewayUsageTable({
                             chainTotal={hasChain ? chainTotal : undefined}
                             chainIndex={hasChain ? chainIndex || chainTotal : undefined}
                           />
+                          {hasChain && !chainExpanded ? (
+                            <button
+                              type="button"
+                              className="mt-1 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                              onClick={() => setChainOpen((prev) => ({ ...prev, [rid]: true }))}
+                            >
+                              查看全部 {chainTotal} 次尝试
+                            </button>
+                          ) : null}
                           {!u.success && !isClientDisconnectResult(u) && u.error_message ? (
                             <div className="mt-0.5 max-w-[14rem] truncate text-[11px] text-red-700 dark:text-red-300" title={u.error_message}>
                               {u.error_message}

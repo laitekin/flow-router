@@ -1,6 +1,6 @@
 /** 使用记录时间范围快捷项：统一生成 datetime-local 字符串（本地时区，含秒）。 */
 
-export type UsageRangePreset = "1h" | "24h" | "today" | "7d" | "30d"
+export type UsageRangePreset = "1h" | "24h" | "today" | "7d" | "30d" | "all"
 
 export const USAGE_RANGE_PRESETS: { id: UsageRangePreset; label: string }[] = [
   { id: "1h", label: "近 1 小时" },
@@ -8,6 +8,8 @@ export const USAGE_RANGE_PRESETS: { id: UsageRangePreset; label: string }[] = [
   { id: "today", label: "今天" },
   { id: "7d", label: "近 7 天" },
   { id: "30d", label: "近 30 天" },
+  // 不限时间：原来「重置」后的默认行为，大表上统计会慢一些
+  { id: "all", label: "全部" },
 ]
 
 /** 默认查询范围：全量统计在大表上必然慢，默认只看今天 */
@@ -30,6 +32,7 @@ export function usageRangeFor(
   preset: UsageRangePreset,
   now: Date = new Date(),
 ): { from: string; to: string } {
+  if (preset === "all") return { from: "", to: "" }
   if (preset === "1h" || preset === "24h") {
     const hours = preset === "1h" ? 1 : 24
     return { from: toLocalInput(new Date(now.getTime() - hours * 3600_000)), to: "" }

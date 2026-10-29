@@ -2136,8 +2136,9 @@ type GatewayUsageQuery struct {
 	To         *time.Time
 	Page       int
 	PageSize   int
-	// SkipEndpoints 不做按入站端点的分组统计（管理后台不展示，省一次全量 GROUP BY）
-	SkipEndpoints bool
+	// OmitErrorPayload 列表不带上游错误 body / header / detail 大字段（管理后台列表用，
+	// 展开时再按 id 拉详情）；默认带全，公开 /v1/usage 等其它调用方行为不变。
+	OmitErrorPayload bool
 }
 
 // usageListOmitColumns 列表不带的大字段：上游错误 body / header 动辄几十 KB，
@@ -2402,18 +2403,21 @@ func (r *GatewayUsageLogs) List(q GatewayUsageQuery) (*GatewayUsagePage, error) 
 
 	var rows []GatewayUsageLog
 	offset := (q.Page - 1) * q.PageSize
-	if err := r.applyFilters(r.db.Model(&GatewayUsageLog{}), q).
-		Omit(usageListOmitColumns...).
-		Order("id DESC").Offset(offset).Limit(q.PageSize).
-		Find(&rows).Error; err != nil {
+	list := r.applyFilters(r.db.Model(&GatewayUsageLog{}), q)
+	if q.OmitErrorPayload {
+		list = list.Omit(usageListOmitColumns...)
+	}
+	if err := list.Order("id DESC").Offset(offset).Limit(q.PageSize).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	items, err := r.enrichUsageItems(rows)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.markErrorPayload(items); err != nil {
-		return nil, err
+	if q.OmitErrorPayload {
+		if err := r.markErrorPayload(items); err != nil {
+			return nil, err
+		}
 	}
 	pages := int(total) / q.PageSize
 	if int(total)%q.PageSize != 0 {
@@ -2709,15 +2713,13 @@ func (r *GatewayUsageLogs) Stats(q GatewayUsageQuery) (*GatewayUsageStats, error
 		return nil, err
 	}
 	var endpoints []GatewayEndpointStat
-	if !q.SkipEndpoints {
-		_ = r.applyFilters(r.db.Model(&GatewayUsageLog{}), q).
-			Select("inbound_endpoint as endpoint, COUNT(*) as requests").
-			Where("inbound_endpoint <> ''").
-			Group("inbound_endpoint").
-			Order("requests DESC").
-			Limit(20).
-			Scan(&endpoints).Error
-	}
+	_ = r.applyFilters(r.db.Model(&GatewayUsageLog{}), q).
+		Select("inbound_endpoint as endpoint, COUNT(*) as requests").
+		Where("inbound_endpoint <> ''").
+		Group("inbound_endpoint").
+		Order("requests DESC").
+		Limit(20).
+		Scan(&endpoints).Error
 
 	totalTokens := row.TotalInputTokens + row.TotalOutputTokens + row.TotalCacheCreationTokens + row.TotalCacheReadTokens
 	rpm, tpm := r.performanceRPMAndTPM(q)
