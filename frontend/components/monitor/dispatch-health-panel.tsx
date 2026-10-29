@@ -24,7 +24,6 @@ import {
   dispatchUsagePath,
   flowShare,
   formatPercent,
-  routeColorIndex,
 } from "@/components/monitor/dispatch-health-utils"
 import { cn } from "@/lib/utils"
 
@@ -50,17 +49,11 @@ echarts.use([SankeyChart, TooltipComponent, LabelLayout, CanvasRenderer])
  */
 
 /**
- * 路由配色。同一条路由不管出现在第几跳都用同一个颜色（见 routeColorIndex），
- * 顺着颜色就能把一条路由在图上串起来。挑的是同明度的一组，混在一张图里不打架。
+ * 配色跟整站一样只用黑白：网关 / 路由节点和普通连线都取前景色（深浅主题自动跟随），
+ * 连线压到很淡，只当底纹。颜色只留给「结局」这一件事——一次过 / 顺延后成功 / 最终失败，
+ * 以及失败后转走的那几股流量，这样一眼看过去有颜色的地方就是需要关注的地方。
  */
-const ROUTE_PALETTE = [
-  "#4c6ef5", "#12b886", "#f59f00", "#7048e8", "#0ca678",
-  "#e8590c", "#1c7ed6", "#ae3ec9", "#087f5b", "#d6336c",
-]
-
 const FLOW_COLORS = {
-  entry: "#364fc7",
-  overflow: "#868e96",
   direct: "#2f9e44",
   recovered: "#f08c00",
   failed: "#e03131",
@@ -84,16 +77,26 @@ const OUTCOME_HINT: Record<string, string> = {
   failed: "点击跳到使用记录，按失败筛选",
 }
 
-function nodeColor(node: GatewayDispatchFlowNode): string {
-  switch (node.kind) {
-    case "route":
-      return ROUTE_PALETTE[routeColorIndex(node.route_id ?? 0, ROUTE_PALETTE.length)]
-    case "outcome":
-      return FLOW_COLORS[(node.outcome ?? "failed") as keyof typeof FLOW_COLORS] ?? FLOW_COLORS.failed
-    case "overflow":
-      return FLOW_COLORS.overflow
-    default:
-      return FLOW_COLORS.entry
+function outcomeColor(node: GatewayDispatchFlowNode | undefined): string | null {
+  if (node?.kind !== "outcome") return null
+  return FLOW_COLORS[(node.outcome ?? "failed") as keyof typeof FLOW_COLORS] ?? FLOW_COLORS.failed
+}
+
+/**
+ * 全部网关视图里后端会给一个「全部请求」根节点：它永远是 100%，只是把所有网关
+ * 汇到一起，却白白占掉一整列、拉出一大片同色的带子。画图时去掉它，网关直接作为
+ * 第一列，图从三列变两列。头部的汇总数字仍然用原始数据，不受影响。
+ */
+function toDisplayFlow(flow: GatewayDispatchFlow): GatewayDispatchFlow {
+  if (flow.scope !== "all") return flow
+  const roots = new Set(flow.nodes.filter((node) => node.kind === "root").map((node) => node.id))
+  if (roots.size === 0) return flow
+  return {
+    ...flow,
+    nodes: flow.nodes
+      .filter((node) => !roots.has(node.id))
+      .map((node) => ({ ...node, depth: Math.max(0, node.depth - 1) })),
+    links: flow.links.filter((link) => !roots.has(link.source) && !roots.has(link.target)),
   }
 }
 
@@ -116,13 +119,13 @@ function flowHeight(flow: GatewayDispatchFlow | null | undefined): number {
   const widest = Math.max(...perDepth.values())
   // 节点总数的一半当行数：同一行里不同列的节点可以共用纵向位置，但也就到这个程度了
   const rows = Math.max(widest, Math.ceil(flow.nodes.length / 2))
-  return Math.min(900, Math.max(320, rows * 46 + 90))
+  return Math.min(900, Math.max(280, rows * 46 + 70))
 }
 
-const NODE_WIDTH = 13
-const NODE_GAP = 16
+const NODE_WIDTH = 8
+const NODE_GAP = 18
 /** 结局列的标签画在节点左边，跟倒数第二列的右侧标签抢同一条缝，给它留一块固定的地 */
-const OUTCOME_LABEL_RESERVE = 62
+const OUTCOME_LABEL_RESERVE = 120
 
 function flowOption(
   flow: GatewayDispatchFlow,
@@ -162,7 +165,7 @@ function flowOption(
   const columnGap = maxDepth > 0 ? (layoutWidth - NODE_WIDTH) / maxDepth : layoutWidth
   const labelWidth = (depth: number): number => {
     // 结局列是我们自己的短词（一次过 / 顺延后成功 / 最终失败），按预留的那块地算
-    if (depth === maxDepth) return Math.max(48, OUTCOME_LABEL_RESERVE)
+    if (depth === maxDepth) return OUTCOME_LABEL_RESERVE
     const reserve = depth === maxDepth - 1 ? OUTCOME_LABEL_RESERVE : 0
     // 留 12px：标签右边缘落在 x + NODE_WIDTH + 5(distance) + budget，离下一列节点还有
     // 7px。实测过（canvas measureText 逐个量标签框）这个余量下没有任何标签压到下一列的
@@ -233,6 +236,10 @@ function flowOption(
         nodeGap: NODE_GAP,
         nodeWidth: NODE_WIDTH,
         nodeAlign: "justify" as const,
+        // 全部网关视图只有两列：不让 ECharts 按连线重心重排，保持后端给的顺序
+        // （结局固定是 一次过 → 顺延后成功 → 最终失败），刷新时位置不上下跳。
+        // 下钻视图跳数多，留给 ECharts 去摊开节点、减少交叉
+        layoutIterations: flow.scope === "all" ? 0 : 32,
         draggable: false,
         // hover 只出 tooltip：focus:'none' 不虚化任何东西；正高亮着的时候连自身的
         // emphasis 样式都关掉，免得鼠标一扫就把调暗的节点重新点亮，跟高亮打架
@@ -247,9 +254,15 @@ function flowOption(
             name: node.id,
             value: node.value,
             depth: node.depth,
-            itemStyle: { color: nodeColor(node), borderWidth: 0, borderRadius: 2, opacity: dimmed ? 0.15 : 1 },
+            itemStyle: {
+              color: outcomeColor(node) ?? labelColor,
+              borderWidth: 0,
+              borderRadius: 1,
+              // 已删除的路由只剩历史日志，画浅一点，跟还能点进去的区分开
+              opacity: dimmed ? 0.15 : node.alive === false ? 0.35 : 0.9,
+            },
             label: {
-              fontSize: 10,
+              fontSize: 11,
               // 画布里不能写 CSS 变量（zrender 解析不了 oklch），颜色由 effect 从容器的
               // 计算样式里取实际的 --foreground 再传进来，深浅色主题都跟着走。
               // 不再给白描边：色带本身的不透明度只有 0.24~0.42，正文字压上去已经读得清，
@@ -263,22 +276,34 @@ function flowOption(
               ellipsis: "…",
               // 用 id 当 name 保证唯一（同一条路由在不同跳是不同节点），
               // 所以标签必须自己给，不能让 ECharts 直接画 name
-              formatter: () => node.label,
+              // 名字 + 请求数 + 占比，不用再挨个悬停才知道每个节点有多少
+              formatter: () => `{name|${node.label}}  {value|${node.value}}{pct| · ${formatPercent(flowShare(node.value, total))}}`,
+              rich: {
+                name: { fontSize: 11, color: labelColor, fontWeight: 500 },
+                value: { fontSize: 11, color: labelColor, fontWeight: 600 },
+                pct: { fontSize: 10, color: labelColor, opacity: 0.55 },
+              },
             },
           }
         }),
         links: flow.links.map((link) => {
-          // 成功的流量跟着来源上色（顺着颜色能看出这股流量是谁发出去的），
-          // 失败转走的一律标红——「哪条路在往外甩」是这张图最该一眼看到的事
-          const source = nodeByID.get(link.source)
-          const color = link.failed ? FLOW_COLORS.failed : source ? nodeColor(source) : FLOW_COLORS.entry
-          const baseOpacity = link.failed ? 0.42 : 0.24
+          // 普通流量一律淡灰当底纹；失败转走的标红——「哪条路在往外甩」是这张图最该
+          // 一眼看到的事；流进「顺延后成功 / 最终失败」的也跟着结局上色，一次过的
+          // 主流量保持灰色，免得一大片绿色把真正的问题盖住
+          const target = nodeByID.get(link.target)
+          const tinted = link.failed
+            ? FLOW_COLORS.failed
+            : target?.outcome === "recovered" || target?.outcome === "failed"
+            ? outcomeColor(target)
+            : null
+          const color = tinted ?? labelColor
+          const baseOpacity = tinted ? 0.4 : 0.09
           const inHighlight = highlightLinks?.has(`${link.source}|${link.target}`)
           // 命中的连线适当调亮一点，在被调暗的背景里才立得住；没命中的直接压得很淡
           const opacity = highlightLinks == null ? baseOpacity : inHighlight ? Math.min(1, baseOpacity + 0.35) : 0.03
           return {
             ...link,
-            lineStyle: { color, opacity, curveness: 0.5 },
+            lineStyle: { color, opacity, curveness: 0.55 },
           }
         }),
       },
@@ -344,7 +369,8 @@ export function DispatchHealthPanel() {
     }
   }, [drillGateway, navigate, range.from, range.to])
 
-  const height = flowHeight(flowData)
+  const displayFlow = useMemo(() => flowData ? toDisplayFlow(flowData) : null, [flowData])
+  const height = flowHeight(displayFlow)
   const activeHighlight = highlightFailovers != null
     ? highlightGroups.find((group) => group.failovers === highlightFailovers) ?? null
     : null
@@ -372,6 +398,7 @@ export function DispatchHealthPanel() {
     // "图被重新画了一张"。真正数据变化（换网关/时间窗口）才会经过下面的动画。
     const dataChanged = lastFlowDataRef.current !== flowData
     lastFlowDataRef.current = flowData
+    const drawn = displayFlow ?? flowData
     // 先 resize 再 setOption：容器高度会随节点数变，不 resize 的话画布还是旧尺寸，
     // 内容会被压扁并溢出到下面的区块上；而且标签的截断宽度是按画布实际宽度算的，
     // 必须拿到 resize 之后的尺寸才对得上
@@ -383,12 +410,12 @@ export function DispatchHealthPanel() {
         ? getComputedStyle(chartRef.current).color || "#3b444f"
         : "#3b444f"
       instance.setOption(
-        flowOption(flowData, height, instance.getWidth(), labelColor, activeHighlight, animate),
+        flowOption(drawn, height, instance.getWidth(), labelColor, activeHighlight, animate),
         true,
       )
     }
     draw(dataChanged)
-    const nodeByID = new Map(flowData.nodes.map((node) => [node.id, node]))
+    const nodeByID = new Map(drawn.nodes.map((node) => [node.id, node]))
     const onClick = (params: { dataType?: string; data?: unknown }) => {
       if (params.dataType === "node") {
         const raw = (params.data as { raw?: GatewayDispatchFlowNode })?.raw
@@ -422,7 +449,7 @@ export function DispatchHealthPanel() {
       window.removeEventListener("resize", resize)
       themeObserver.disconnect()
     }
-  }, [flowData, height, handleNodeClick, activeHighlight])
+  }, [flowData, displayFlow, height, handleNodeClick, activeHighlight])
 
   useEffect(() => () => { chart.current?.dispose(); chart.current = null }, [])
 
@@ -462,7 +489,7 @@ export function DispatchHealthPanel() {
           <h3 className="mr-1 shrink-0 text-xs font-semibold">请求流向</h3>
           {/* 网关 tag：直接切图，不用回到全部再点一次 */}
           <button type="button" onClick={() => setDrillGateway(null)}
-            className={cn("rounded px-1.5 py-0.5 text-[10px]", drillGateway == null ? "bg-brand/10 font-medium text-brand" : "text-muted-foreground hover:bg-muted")}>
+            className={cn("rounded px-1.5 py-0.5 text-[10px]", drillGateway == null ? "bg-foreground font-medium text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
             全部网关
           </button>
           {gateways.map((gateway) => (
@@ -471,8 +498,8 @@ export function DispatchHealthPanel() {
               title={`${gateway.name} · ${gateway.requests} 请求`}
               className={cn("max-w-44 truncate rounded px-1.5 py-0.5 text-[10px]",
                 drillGateway === gateway.gateway_group_id
-                  ? "bg-brand/10 font-medium text-brand"
-                  : "text-muted-foreground hover:bg-muted")}>
+                  ? "bg-foreground font-medium text-background"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
               {gateway.name}
               <span className="ml-1 tabular-nums opacity-60">{gateway.requests}</span>
             </button>
@@ -524,7 +551,7 @@ export function DispatchHealthPanel() {
             const empty = !flowData || flowData.requests === 0
             const emptyText = !flowData ? "加载中…" : "当前窗口没有调度记录"
             return (
-              <div className="relative rounded-md border border-border/70 bg-background">
+              <div className="relative rounded-md border border-border/60 bg-background">
                 {/* position:relative + overflow:hidden 是给上面 appendToBody:false 的
                     tooltip 用的：tooltip 会挂在这层容器内部，被这层裁切，无论算出
                     什么坐标都跳不出这张卡片 */}
