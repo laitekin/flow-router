@@ -24,6 +24,7 @@ import {
   dispatchUsagePath,
   flowShare,
   formatPercent,
+  routeColorIndex,
 } from "@/components/monitor/dispatch-health-utils"
 import { cn } from "@/lib/utils"
 
@@ -49,11 +50,17 @@ echarts.use([SankeyChart, TooltipComponent, LabelLayout, CanvasRenderer])
  */
 
 /**
- * 配色跟整站一样只用黑白：网关 / 路由节点和普通连线都取前景色（深浅主题自动跟随），
- * 连线压到很淡，只当底纹。颜色只留给「结局」这一件事——一次过 / 顺延后成功 / 最终失败，
- * 以及失败后转走的那几股流量，这样一眼看过去有颜色的地方就是需要关注的地方。
+ * 路由配色。同一条路由不管出现在第几跳都用同一个颜色（见 routeColorIndex），
+ * 顺着颜色就能把一条路由在图上串起来。挑的是同明度的一组，混在一张图里不打架。
  */
+const ROUTE_PALETTE = [
+  "#4c6ef5", "#12b886", "#f59f00", "#7048e8", "#0ca678",
+  "#e8590c", "#1c7ed6", "#ae3ec9", "#087f5b", "#d6336c",
+]
+
 const FLOW_COLORS = {
+  entry: "#364fc7",
+  overflow: "#868e96",
   direct: "#2f9e44",
   recovered: "#f08c00",
   failed: "#e03131",
@@ -77,9 +84,17 @@ const OUTCOME_HINT: Record<string, string> = {
   failed: "点击跳到使用记录，按失败筛选",
 }
 
-function outcomeColor(node: GatewayDispatchFlowNode | undefined): string | null {
-  if (node?.kind !== "outcome") return null
-  return FLOW_COLORS[(node.outcome ?? "failed") as keyof typeof FLOW_COLORS] ?? FLOW_COLORS.failed
+function nodeColor(node: GatewayDispatchFlowNode): string {
+  switch (node.kind) {
+    case "route":
+      return ROUTE_PALETTE[routeColorIndex(node.route_id ?? 0, ROUTE_PALETTE.length)]
+    case "outcome":
+      return FLOW_COLORS[(node.outcome ?? "failed") as keyof typeof FLOW_COLORS] ?? FLOW_COLORS.failed
+    case "overflow":
+      return FLOW_COLORS.overflow
+    default:
+      return FLOW_COLORS.entry
+  }
 }
 
 /**
@@ -255,11 +270,11 @@ function flowOption(
             value: node.value,
             depth: node.depth,
             itemStyle: {
-              color: outcomeColor(node) ?? labelColor,
+              color: nodeColor(node),
               borderWidth: 0,
               borderRadius: 1,
               // 已删除的路由只剩历史日志，画浅一点，跟还能点进去的区分开
-              opacity: dimmed ? 0.15 : node.alive === false ? 0.35 : 0.9,
+              opacity: dimmed ? 0.15 : node.alive === false ? 0.35 : 1,
             },
             label: {
               fontSize: 11,
@@ -287,17 +302,11 @@ function flowOption(
           }
         }),
         links: flow.links.map((link) => {
-          // 普通流量一律淡灰当底纹；失败转走的标红——「哪条路在往外甩」是这张图最该
-          // 一眼看到的事；流进「顺延后成功 / 最终失败」的也跟着结局上色，一次过的
-          // 主流量保持灰色，免得一大片绿色把真正的问题盖住
-          const target = nodeByID.get(link.target)
-          const tinted = link.failed
-            ? FLOW_COLORS.failed
-            : target?.outcome === "recovered" || target?.outcome === "failed"
-            ? outcomeColor(target)
-            : null
-          const color = tinted ?? labelColor
-          const baseOpacity = tinted ? 0.4 : 0.09
+          // 成功的流量跟着来源上色（顺着颜色能看出这股流量是谁发出去的），
+          // 失败转走的一律标红——「哪条路在往外甩」是这张图最该一眼看到的事
+          const source = nodeByID.get(link.source)
+          const color = link.failed ? FLOW_COLORS.failed : source ? nodeColor(source) : FLOW_COLORS.entry
+          const baseOpacity = link.failed ? 0.42 : 0.24
           const inHighlight = highlightLinks?.has(`${link.source}|${link.target}`)
           // 命中的连线适当调亮一点，在被调暗的背景里才立得住；没命中的直接压得很淡
           const opacity = highlightLinks == null ? baseOpacity : inHighlight ? Math.min(1, baseOpacity + 0.35) : 0.03
@@ -489,7 +498,7 @@ export function DispatchHealthPanel() {
           <h3 className="mr-1 shrink-0 text-xs font-semibold">请求流向</h3>
           {/* 网关 tag：直接切图，不用回到全部再点一次 */}
           <button type="button" onClick={() => setDrillGateway(null)}
-            className={cn("rounded px-1.5 py-0.5 text-[10px]", drillGateway == null ? "bg-foreground font-medium text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+            className={cn("rounded px-1.5 py-0.5 text-[10px]", drillGateway == null ? "bg-brand/10 font-medium text-brand" : "text-muted-foreground hover:bg-muted")}>
             全部网关
           </button>
           {gateways.map((gateway) => (
@@ -498,8 +507,8 @@ export function DispatchHealthPanel() {
               title={`${gateway.name} · ${gateway.requests} 请求`}
               className={cn("max-w-44 truncate rounded px-1.5 py-0.5 text-[10px]",
                 drillGateway === gateway.gateway_group_id
-                  ? "bg-foreground font-medium text-background"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+                  ? "bg-brand/10 font-medium text-brand"
+                  : "text-muted-foreground hover:bg-muted")}>
               {gateway.name}
               <span className="ml-1 tabular-nums opacity-60">{gateway.requests}</span>
             </button>
