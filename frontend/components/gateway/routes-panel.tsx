@@ -293,9 +293,9 @@ export function RoutesPanel({
       </Button>
     </div>
     <p className="text-[11px] leading-5 text-muted-foreground">
-      未指定模型首选时，按账号计费倍率
+      列表顺序 = 尝试顺序：按账号计费倍率
       {rateSort === "desc" ? "从高到低" : "从低到高"}
-      排列；同倍率时按权重选择。模型首选优先尝试，仍受启用状态与暂停窗口等限制。
+      排列；同倍率时权重大优先。
       {rateResortEnabled
         ? "已在编辑组中开启「渠道分组价格倍率重排」：倍率扫描结束后会按源分组实时倍率自动重写顺序与计费倍率。"
         : "未开启价格倍率重排时，仅保存路由 / 改排序方向会落库顺序；可在编辑组中开启。"}

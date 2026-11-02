@@ -1,14 +1,9 @@
-import { useState } from "react"
-import { AlertTriangle, DatabaseZap, Loader2, MoreHorizontal, Plus, RefreshCw, Star } from "lucide-react"
+import { DatabaseZap, Loader2, Plus, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   Select,
   SelectContent,
@@ -45,7 +40,6 @@ import {
   sourceTagTone,
   testBusyKey,
 } from "./gateway-utils"
-import { ModelPreferenceDialog, modelPreferenceTriggerID } from "./model-preference-dialog"
 
 const MODELS_MODE_OPTIONS = [
   {
@@ -83,9 +77,6 @@ type ModelsPanelProps = {
   onSyncModels: () => void
   onOpenCatalog: () => void
   onSave: () => void
-  hasUnsavedChanges: boolean
-  preferredChangesPending: boolean
-  onPreferredRouteChange: (modelID: string, routeID?: number) => void
   customModel: string
   onCustomModelChange: (v: string) => void
   onAddCustomModel: () => void
@@ -110,9 +101,6 @@ export function ModelsPanel({
   onSyncModels,
   onOpenCatalog,
   onSave,
-  hasUnsavedChanges,
-  preferredChangesPending,
-  onPreferredRouteChange,
   customModel,
   onCustomModelChange,
   onAddCustomModel,
@@ -129,18 +117,6 @@ export function ModelsPanel({
   onMappingRowsChange,
   modelSuggestions,
 }: ModelsPanelProps) {
-  const [preferenceModelID, setPreferenceModelID] = useState<string | null>(null)
-  const preferenceModel = modelItems.find((m) => m.id === preferenceModelID)
-  const preferenceSources = preferenceModel
-    ? resolveModelSources(preferenceModel, routeDrafts, channelNameByID, providerNameByID)
-        .filter((s) => s.route_id != null)
-    : []
-  const unavailableLabel = preferenceModel?.preferred_route_id &&
-    !preferenceSources.some((s) => s.route_id === preferenceModel.preferred_route_id)
-    ? preferenceModel.sources?.find((s) => s.route_id === preferenceModel.preferred_route_id)?.channel_name ||
-      `线路 #${preferenceModel.preferred_route_id}`
-    : undefined
-
   return (
     <div className="space-y-4">
 <Card className="overflow-hidden border-border shadow-none">
@@ -165,20 +141,11 @@ export function ModelsPanel({
           </SelectContent>
         </Select>
         <Button size="sm" onClick={() => void onSave()} disabled={busy}>
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-          保存模型配置
+          保存
         </Button>
-        {hasUnsavedChanges ? (
-          <Badge variant="outline" role="status" className="border-amber-500/30 text-amber-700 dark:text-amber-300">
-            未保存更改
-          </Badge>
-        ) : null}
       </div>
       <p className="max-w-3xl text-[11px] leading-relaxed text-muted-foreground">
         {modelsModeHint(modelsMode)}
-      </p>
-      <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
-        每个模型可指定首选线路；更改后点击“保存模型配置”生效。
       </p>
     </div>
 
@@ -197,8 +164,7 @@ export function ModelsPanel({
         className="h-9"
         variant="outline"
         onClick={() => void onSyncModels()}
-        disabled={busy || preferredChangesPending}
-        title={preferredChangesPending ? "请先保存首选线路更改" : undefined}
+        disabled={busy}
       >
         <RefreshCw className="size-3.5" /> 从渠道同步去重
       </Button>
@@ -206,8 +172,7 @@ export function ModelsPanel({
         className="h-9"
         variant="outline"
         onClick={() => void onOpenCatalog()}
-        disabled={busy || preferredChangesPending}
-        title={preferredChangesPending ? "请先保存首选线路更改" : undefined}
+        disabled={busy}
       >
         <DatabaseZap className="size-3.5" /> 同步官方模型目录
       </Button>
@@ -223,9 +188,9 @@ export function ModelsPanel({
           <TableHeader>
             <TableRow>
               <TableHead className="w-[28%]">模型 ID</TableHead>
-              <TableHead>渠道-分组</TableHead>
-              <TableHead className="hidden w-12 px-1 text-center sm:table-cell">状态</TableHead>
-              <TableHead className="w-24 text-right sm:w-28">操作</TableHead>
+              <TableHead className="w-[42%]">渠道-分组</TableHead>
+              <TableHead className="w-14 px-1 text-center">状态</TableHead>
+              <TableHead className="w-[22%] text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -238,20 +203,11 @@ export function ModelsPanel({
               )
               const tests = modelTestResults[m.id] ?? []
               const okN = tests.filter((t) => t.ok).length
-              const preferredID = Number(m.preferred_route_id) || 0
-              const preferredSource = sources.find((s) => s.route_id === preferredID)
-              const preferredUnavailable = preferredID > 0 && !preferredSource
-              const preferredRoute = routeDrafts.find((r) => r.id === preferredID)
-              const preferredCooling = preferredSource && preferredRoute?.temp_unschedulable_until &&
-                new Date(preferredRoute.temp_unschedulable_until).getTime() > Date.now()
-              const orderedSources = preferredSource
-                ? [preferredSource, ...sources.filter((s) => s !== preferredSource)]
-                : sources
               return (
                 <TableRow key={m.id}>
                   <TableCell className="align-top">
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <code className="max-w-full break-all text-xs sm:truncate sm:text-sm" title={m.id}>
+                      <code className="max-w-full truncate text-sm" title={m.id}>
                         {m.id}
                       </code>
                       <Badge
@@ -273,7 +229,7 @@ export function ModelsPanel({
                       </span>
                     ) : (
                       <div className="flex max-w-full flex-wrap content-start gap-1">
-                        {orderedSources.map((s) => {
+                        {sources.map((s) => {
                           const tr = findSourceTest(s, tests)
                           const tone = sourceTagTone(tr)
                           const tagBusy =
@@ -290,7 +246,6 @@ export function ModelsPanel({
                                     "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                     "disabled:cursor-wait disabled:opacity-80",
                                     tone.className,
-                                    s.route_id === preferredID && "border-primary/40 bg-primary/5",
                                     tagBusy && "ring-1 ring-primary/40",
                                   )}
                                   onClick={() => {
@@ -303,13 +258,6 @@ export function ModelsPanel({
                                 >
                                   {tagBusy ? (
                                     <Loader2 className="size-3 shrink-0 animate-spin" />
-                                  ) : null}
-                                  {s.route_id === preferredID ? (
-                                    <span className="inline-flex shrink-0 items-center gap-0.5 font-medium text-primary">
-                                      <Star className="size-3" /> 首选
-                                    </span>
-                                  ) : preferredID > 0 ? (
-                                    <span className="shrink-0 text-muted-foreground">备用</span>
                                   ) : null}
                                   <span className="min-w-0 break-all">
                                     {s.label}
@@ -360,18 +308,8 @@ export function ModelsPanel({
                         })}
                       </div>
                     )}
-                    {preferredUnavailable ? (
-                      <p role="status" className="mt-1.5 flex items-start gap-1 text-xs text-amber-700 dark:text-amber-300">
-                        <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-                        <span>首选不可用{sources.length ? "，将按规则选择备用。" : "，请启用或重新绑定线路。"}</span>
-                      </p>
-                    ) : preferredCooling ? (
-                      <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">首选冷却中，将使用其他可用线路。</p>
-                    ) : preferredID === 0 ? (
-                      <p className="mt-1.5 text-[11px] text-muted-foreground">自动选择</p>
-                    ) : null}
                   </TableCell>
-                  <TableCell className="hidden px-1 text-center align-top text-xs sm:table-cell">
+                  <TableCell className="px-1 text-center align-top text-xs">
                     {tests.length === 0 ? (
                       <span className="text-muted-foreground">—</span>
                     ) : (
@@ -394,27 +332,33 @@ export function ModelsPanel({
                       <Button
                         size="sm"
                         variant="outline"
-                        className="min-h-11 px-2 text-xs sm:min-h-8"
-                        aria-label={`设置 ${m.id} 的首选线路`}
-                        id={modelPreferenceTriggerID(m.id)}
-                        disabled={busy}
-                        onClick={() => setPreferenceModelID(m.id)}
+                        onClick={() => onOpenModelTest(m)}
                       >
-                        <Star className="size-3.5" /> 首选
+                        测试
                       </Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button size="icon" variant="ghost" className="min-h-11 w-8 sm:min-h-8" aria-label={`${m.id} 的更多操作`} disabled={busy}>
-                            <MoreHorizontal className="size-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem className="min-h-11 sm:min-h-8" onSelect={() => onOpenModelTest(m)}>测试模型</DropdownMenuItem>
-                          <DropdownMenuItem className="min-h-11 sm:min-h-8" onSelect={() => onMappingRowsChange([...mappingRows, { from: m.id, to: "" }])}>添加映射</DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem className="min-h-11 sm:min-h-8" variant="destructive" onSelect={() => setModelItems(modelItems.filter((x) => x.id !== m.id))}>移除模型</DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          onMappingRowsChange([
+                            ...mappingRows,
+                            { from: m.id, to: "" },
+                          ])
+                        }
+                      >
+                        映射
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setModelItems(
+                            modelItems.filter((x) => x.id !== m.id),
+                          )
+                        }
+                      >
+                        删除
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -434,11 +378,11 @@ export function ModelsPanel({
         </Table>
       </div>
       <ul className="w-full max-w-full space-y-0.5 text-[11px] leading-5 text-muted-foreground">
-        <li>• 首选、备用仅来自该模型的可用绑定；禁用线路不参与选择</li>
+        <li>• 禁用路由不展示（不可调度）</li>
         <li>• 未配置路由时，提示先在「路由」里配渠道并启用</li>
         <li>• 直连 provider 会显示渠道名（有的话）或 直连 #id</li>
         <li>
-          • 未绑定具体线路的自定义模型，沿用组内全部启用线路
+          • 添加自定义模型后，无需再同步，即可在「渠道-分组」列看到全部渠道并直接测试
         </li>
       </ul>
     </div>
@@ -450,21 +394,6 @@ export function ModelsPanel({
     />
   </CardContent>
 </Card>
-
-      {preferenceModel ? (
-        <ModelPreferenceDialog
-          key={preferenceModel.id}
-          model={preferenceModel}
-          sources={preferenceSources}
-          unavailableLabel={unavailableLabel}
-          busy={busy}
-          onClose={() => setPreferenceModelID(null)}
-          onApply={(routeID) => {
-            onPreferredRouteChange(preferenceModel.id, routeID)
-            setPreferenceModelID(null)
-          }}
-        />
-      ) : null}
 
     </div>
   )

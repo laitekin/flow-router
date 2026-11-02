@@ -208,9 +208,6 @@ function pushAllRoutesAsSources(
     const kind = routeSourceKind(r)
     if (kind === "provider") {
       const pid = Number(r.gateway_provider_id) || 0
-      // options only contains enabled providers. A route alone does not make
-      // a disabled/deleted provider a valid preference candidate.
-      if (providerNameByID && !providerNameByID.has(pid)) continue
       const name =
         providerNameByID?.get(pid) ||
         (pid > 0 ? `直连 #${pid}` : "直连渠道")
@@ -235,8 +232,7 @@ function pushAllRoutesAsSources(
 /**
  * 解析模型可测来源：
  * - 同步模型：优先用 sources / channel_ids
- * - 显式线路绑定优先，包含自定义模型，与后端允许列表一致
- * - 未绑定线路的自定义模型：关联组内全部启用路由
+ * - 自定义模型：关联组内全部启用路由，便于逐渠道路测
  * - 无来源时：同样回退到全部启用路由
  */
 export function resolveModelSources(
@@ -279,19 +275,7 @@ export function resolveModelSources(
     })
   }
 
-  const boundRouteIDs = new Set(
-    (m.sources ?? []).map((s) => Number(s.route_id)).filter((id) => id > 0),
-  )
-  if (boundRouteIDs.size > 0) {
-    const byID = new Map(routes.map((r) => [r.id, r]))
-    const bound = [...boundRouteIDs]
-      .map((id) => byID.get(id))
-      .filter((r): r is Partial<GatewayRoute> => r != null)
-    pushAllRoutesAsSources(bound, channelNameByID, providerNameByID, push)
-    return out
-  }
-
-  // Legacy custom entries without explicit bindings retain all-route behavior.
+  // 自定义模型始终关联当前组全部启用路由（可测试）
   if (m.source === "custom") {
     pushAllRoutesAsSources(routes, channelNameByID, providerNameByID, push)
     return out
