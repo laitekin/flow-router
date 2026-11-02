@@ -31,10 +31,11 @@ func (svc *Service) ParseModelsJSON(raw string) []ModelListItem {
 			src = "sync"
 		}
 		item := ModelListItem{
-			ID:         id,
-			Source:     src,
-			ChannelIDs: it.ChannelIDs,
-			Sources:    svc.normalizeModelSources(it.Sources, it.ChannelIDs),
+			ID:               id,
+			Source:           src,
+			ChannelIDs:       it.ChannelIDs,
+			Sources:          svc.normalizeModelSources(it.Sources, it.ChannelIDs),
+			PreferredRouteID: it.PreferredRouteID,
 		}
 		if len(item.ChannelIDs) == 0 && len(item.Sources) > 0 {
 			item.ChannelIDs = svc.channelIDsFromSources(item.Sources)

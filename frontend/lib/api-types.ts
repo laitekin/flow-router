@@ -699,6 +699,8 @@ export interface GatewayModelListItem {
   source: "sync" | "custom" | "catalog"
   channel_ids?: number[]
   sources?: GatewayModelSource[]
+  /** 未设置或为 0 时沿用分组排序；仅在绑定且可调度的线路中优先选择。 */
+  preferred_route_id?: number
 }
 
 export interface GatewayCatalogModel {
