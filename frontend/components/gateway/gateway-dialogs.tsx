@@ -51,6 +51,7 @@ import {
   perTokenToMTok,
   resolveModelSources,
   sourceTagTone,
+  modelSourceTests,
   testBusyKey,
   type GroupFormState,
   type KeyFormState,
@@ -113,7 +114,7 @@ export function ModelTestDialog({
               channelNameByID,
               providerNameByID,
             )
-            const results = modelTestDialogResults
+            const results = modelSourceTests(sources, modelTestDialogResults)
             const okN = results.filter((t) => t.ok).length
             const batchBusy =
               modelTesting === testBusyKey(modelTestTarget.id)
@@ -155,7 +156,7 @@ export function ModelTestDialog({
                 <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
                   {sources.length === 0 ? (
                     <div className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-                      暂无关联路由。请先在「路由」中配置渠道/直连并启用，自定义模型会自动关联全部启用路由。
+                      暂无可用绑定。请在「渠道路由」中检查已绑定线路是否存在并启用。
                     </div>
                   ) : (
                     <ul className="space-y-2">

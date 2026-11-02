@@ -188,6 +188,24 @@ export function findSourceTest(
   )
 }
 
+/** Model-facing labels omit administrative group IDs, not meaningful pool names. */
+export function modelSourceLabel(raw: string): string {
+  return raw.split(/[|｜]/)
+    .map((part) => part.trim())
+    .filter((part) => part && !/^(?:上游分组|源分组)\s*ID\s*[:：#]?\s*\d+$/i.test(part))
+    .join(" · ")
+}
+
+/** Ignore results from routes removed from this model's current bindings. */
+export function modelSourceTests(
+  sources: ModelSourceLabel[],
+  tests: GatewayModelTestResult[],
+): GatewayModelTestResult[] {
+  const routeIDs = new Set(sources.flatMap((s) => s.route_id != null ? [s.route_id] : []))
+  const channelIDs = new Set(sources.filter((s) => s.route_id == null).map((s) => s.channel_id))
+  return tests.filter((t) => routeIDs.has(t.route_id) || channelIDs.has(t.channel_id))
+}
+
 /** 把组内路由展开为可测来源标签（自定义模型 / 无来源时用） */
 function pushAllRoutesAsSources(
   routes: Partial<GatewayRoute>[],
@@ -208,6 +226,7 @@ function pushAllRoutesAsSources(
     const kind = routeSourceKind(r)
     if (kind === "provider") {
       const pid = Number(r.gateway_provider_id) || 0
+      if (providerNameByID && !providerNameByID.has(pid)) continue
       const name =
         providerNameByID?.get(pid) ||
         (pid > 0 ? `直连 #${pid}` : "直连渠道")
@@ -231,9 +250,9 @@ function pushAllRoutesAsSources(
 
 /**
  * 解析模型可测来源：
- * - 同步模型：优先用 sources / channel_ids
- * - 自定义模型：关联组内全部启用路由，便于逐渠道路测
- * - 无来源时：同样回退到全部启用路由
+ * - 显式 route_id 绑定优先，与后端允许列表一致（包括自定义模型）
+ * - 旧数据中未限定线路的自定义模型沿用组内全部启用路由
+ * - 同步模型继续兼容 sources / channel_ids
  */
 export function resolveModelSources(
   m: GatewayModelListItem,
@@ -254,28 +273,33 @@ export function resolveModelSources(
     if (!src.channel_id && !src.route_id) return
     const channelName =
       src.channel_name || channelNameByID.get(src.channel_id) || undefined
-    const label = channelGroupLabel(
+    const label = modelSourceLabel(channelGroupLabel(
       channelName,
       src.source_group_name,
       src.channel_id || 0,
-    )
-    const sg = formatSourceGroupDisplay(
-      src.source_group_name,
-      src.source_group_id,
-    )
+    ))
     const key = `${src.route_id ?? 0}:${src.channel_id}:${src.source_group_name ?? ""}:${src.source_group_id ?? ""}`
     if (seen.has(key)) return
     seen.add(key)
     out.push({
       key,
       label,
-      sourceTip: sg.tip,
       route_id: src.route_id,
       channel_id: src.channel_id,
     })
   }
 
-  // 自定义模型始终关联当前组全部启用路由（可测试）
+  const boundIDs = new Set((m.sources ?? []).map((s) => Number(s.route_id)).filter((id) => id > 0))
+  if (boundIDs.size > 0) {
+    const byID = new Map(routes.map((r) => [r.id, r]))
+    const bound = [...boundIDs].map((id) => byID.get(id))
+      .filter((r): r is Partial<GatewayRoute> => r != null)
+    // Missing/disabled bindings must not expand into unrelated group routes.
+    pushAllRoutesAsSources(bound, channelNameByID, providerNameByID, push)
+    return out
+  }
+
+  // Older unbound custom entries retain the backend's all-route behavior.
   if (m.source === "custom") {
     pushAllRoutesAsSources(routes, channelNameByID, providerNameByID, push)
     return out

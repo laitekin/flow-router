@@ -130,7 +130,7 @@ export function deriveSchedulerSnapshot(
       if (a.weight !== b.weight) return b.weight - a.weight
       return a.index - b.index
     })
-    .map((row, index) => ({
+    .map<SchedulerRouteRow>((row, index) => ({
       ...row,
       state: index === 0 ? "primary" : "fallback",
     }))
