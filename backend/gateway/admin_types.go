@@ -177,6 +177,8 @@ type ModelListItem struct {
 	Source     string        `json:"source"` // sync | custom | catalog
 	ChannelIDs []uint        `json:"channel_ids,omitempty"`
 	Sources    []ModelSource `json:"sources,omitempty"`
+	// PreferredRouteID selects the first eligible route without changing billing rates.
+	PreferredRouteID uint `json:"preferred_route_id,omitempty"`
 }
 
 // CatalogSyncInput selects public catalog models and the enabled routes that

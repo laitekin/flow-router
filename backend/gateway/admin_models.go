@@ -322,46 +322,7 @@ func (a *AdminService) SyncGroupModels(ctx context.Context, groupID uint, in Syn
 		return nil, err
 	}
 	existing := a.ParseModelsJSON(group.ModelsJSON)
-	custom := make([]ModelListItem, 0)
-	customSeen := map[string]struct{}{}
-	appendCustom := func(id string) {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			return
-		}
-		if _, ok := customSeen[id]; ok {
-			return
-		}
-		customSeen[id] = struct{}{}
-		custom = append(custom, ModelListItem{ID: id, Source: "custom"})
-	}
-	// 库内已保存的自定义
-	for _, it := range existing {
-		if it.Source == "custom" {
-			appendCustom(it.ID)
-		}
-	}
-	// 前端本地未保存的自定义（同步时一并保留，避免点同步冲掉）
-	for _, it := range in.CustomModels {
-		appendCustom(it.ID)
-	}
-	merged := make([]ModelListItem, 0, len(preview)+len(custom))
-	seen := map[string]struct{}{}
-	for _, p := range preview {
-		seen[p.ID] = struct{}{}
-		merged = append(merged, ModelListItem{
-			ID:         p.ID,
-			Source:     "sync",
-			ChannelIDs: p.ChannelIDs,
-			Sources:    p.Sources,
-		})
-	}
-	for _, c := range custom {
-		if _, ok := seen[c.ID]; ok {
-			continue
-		}
-		merged = append(merged, c)
-	}
+	merged := mergeChannelSyncedModels(existing, in.CustomModels, preview)
 	group.ModelsJSON = a.ModelsJSONString(merged)
 	if err := a.Groups.Update(group); err != nil {
 		return nil, err

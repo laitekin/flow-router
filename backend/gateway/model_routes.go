@@ -36,6 +36,12 @@ func mergeCatalogModels(existing []ModelListItem, selected []CatalogModel, sourc
 			Sources:    append([]ModelSource(nil), sources...),
 		}
 		if i, ok := index[id]; ok {
+			for _, source := range sources {
+				if source.RouteID == out[i].PreferredRouteID {
+					item.PreferredRouteID = out[i].PreferredRouteID
+					break
+				}
+			}
 			out[i] = item
 			continue
 		}
@@ -132,4 +138,55 @@ func filterRoutesForModel(routes []storage.GatewayRoute, items []ModelListItem, 
 func routeAllowsModel(items []ModelListItem, routeID uint, model string) bool {
 	filtered := filterRoutesForModel([]storage.GatewayRoute{{ID: routeID}}, items, model)
 	return len(filtered) == 1 && filtered[0].ID == routeID
+}
+
+// Channel discovery must not widen manually configured bindings or erase a
+// saved preference when its upstream is temporarily absent from discovery.
+func mergeChannelSyncedModels(existing, drafts []ModelListItem, preview []ModelPreviewItem) []ModelListItem {
+	retained := make(map[string]ModelListItem)
+	order := make([]string, 0)
+	keep := func(item ModelListItem) {
+		item.ID = strings.TrimSpace(item.ID)
+		if item.ID == "" {
+			return
+		}
+		if _, exists := retained[item.ID]; !exists {
+			order = append(order, item.ID)
+		}
+		retained[item.ID] = item
+	}
+	for _, item := range existing {
+		if item.Source == "custom" || item.Source == "catalog" || item.PreferredRouteID != 0 {
+			keep(item)
+		}
+	}
+	for _, item := range drafts {
+		item.ID = strings.TrimSpace(item.ID)
+		// Older clients send custom IDs only; retain the saved metadata.
+		if _, exists := retained[item.ID]; exists && len(item.Sources) == 0 && len(item.ChannelIDs) == 0 && item.PreferredRouteID == 0 {
+			continue
+		}
+		item.Source = "custom"
+		keep(item)
+	}
+	out := make([]ModelListItem, 0, len(preview)+len(retained))
+	seen := make(map[string]bool)
+	for _, model := range preview {
+		id := strings.TrimSpace(model.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if saved, ok := retained[id]; ok {
+			out = append(out, saved)
+		} else {
+			out = append(out, ModelListItem{ID: id, Source: "sync", ChannelIDs: model.ChannelIDs, Sources: model.Sources})
+		}
+	}
+	for _, id := range order {
+		if !seen[id] {
+			out = append(out, retained[id])
+		}
+	}
+	return out
 }

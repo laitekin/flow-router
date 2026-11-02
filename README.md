@@ -863,6 +863,20 @@ Route field `upstream_protocol`:
 - `hybrid`: merge sync results with custom entries.
 Admin UI: Preview / Sync / probe-by-model. Public `GET /v1/models` uses a short TTL cache (`gateway.modelsCacheTTLSeconds`).
 
+### Preferred route per model
+
+In **Request Gateway → Model mapping**, click a model's **Preferred route** action,
+choose one of its bound, enabled routes, apply the choice, then **Save model configuration**.
+The list marks the preferred and backup routes and shows unsaved changes. Choose
+**Automatic** to restore group-level sorting. A disabled, deleted or unbound preference
+is shown as unavailable; select another route or clear it.
+
+The saved `preferred_route_id` is applied after route eligibility, cooldown and
+conversation-context checks. It changes selection order without changing billing
+ratios. Request-error failover still follows the group's retry/failover policy.
+Channel sync preserves manual bindings and saved preferences; save preference edits
+before syncing. Catalog rebinding retains the preference only while its route remains bound.
+
 ### User-Agent
 
 Route `user_agent_mode`:

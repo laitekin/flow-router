@@ -203,6 +203,7 @@ func (rt *Runtime) HandleForward(c *gin.Context, path string, kind protocolKind)
 			}
 		}
 		candidates := SortRoutes(routes, groupsByChannel, group.RateSortDirection, time.Now(), exclude)
+		candidates = preferModelRoute(candidates, rt.ParseModelsJSON(group.ModelsJSON), requestedModel)
 		if len(candidates) == 0 {
 			stopReason = "no_eligible_backup"
 			if routesTried == 0 {

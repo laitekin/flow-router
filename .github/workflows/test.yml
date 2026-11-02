@@ -60,8 +60,10 @@ jobs:
           version: 10.4.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
       - run: pnpm build
