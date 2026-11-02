@@ -263,7 +263,7 @@ export function SchedulerWorkbench({
             <div>
               <CardTitle className="text-sm">路由规则明细</CardTitle>
               <p className="mt-1 text-xs text-muted-foreground">
-                此处展示分组默认规则与权重占比预览；单个模型的首选线路请在“模型映射”中设置。
+                权重占比仅作配置预览；当前运行时仍按倍率、权重、Position 排序。
               </p>
             </div>
             <Badge variant="outline" className="gap-1.5 text-[10px]">

@@ -50,8 +50,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 # ---------- Stage 3: 运行时 ----------
 FROM alpine:3.20
-ARG VCS_REF=unknown
-LABEL org.opencontainers.image.revision=$VCS_REF
 RUN apk add --no-cache ca-certificates tzdata wget && \
     mkdir -p /app/data
 WORKDIR /app

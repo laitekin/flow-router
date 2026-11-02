@@ -231,18 +231,6 @@ export function GatewayPage() {
     [groups, selectedGroupID],
   )
 
-  const preferredChangesPending = useMemo(() => {
-    if (!selectedGroup) return false
-    const saved = new Map(parseModelsJSON(selectedGroup.models_json).map((m) => [m.id, m.preferred_route_id ?? 0]))
-    return modelItems.some((m) => (m.preferred_route_id ?? 0) !== (saved.get(m.id) ?? 0))
-  }, [modelItems, selectedGroup])
-
-  const modelConfigDirty = useMemo(() => selectedGroup != null && (
-    modelsMode !== (selectedGroup.models_mode || "auto") ||
-    JSON.stringify(modelItems) !== JSON.stringify(parseModelsJSON(selectedGroup.models_json)) ||
-    serializeMappingJSON(mappingRows) !== serializeMappingJSON(parseMappingJSON(selectedGroup.model_mapping))
-  ), [selectedGroup, modelsMode, modelItems, mappingRows])
-
   const targetGroupID = useMemo(() => {
     const value = Number(searchParams.get("group"))
     return Number.isInteger(value) && value > 0 ? value : null
@@ -274,9 +262,7 @@ export function GatewayPage() {
 
   const providerNameByID = useMemo(() => {
     const m = new Map<number, string>()
-    for (const p of providerOptions) {
-      if (p.enabled !== false) m.set(p.id, p.name)
-    }
+    for (const p of providerOptions) m.set(p.id, p.name)
     return m
   }, [providerOptions])
 
@@ -804,15 +790,8 @@ export function GatewayPage() {
   }, [usageDeepLink, loadUsage, usagePageSize])
 
   // 调度面板深链接：先切组，再切到渠道路由标签。
-  const groupDeepLinkRef = useRef<number | null>(null)
   useEffect(() => {
-    if (!targetGroupID) {
-      groupDeepLinkRef.current = null
-      return
-    }
-    if (!groups.some((group) => group.id === targetGroupID)) return
-    if (groupDeepLinkRef.current === targetGroupID) return
-    groupDeepLinkRef.current = targetGroupID
+    if (!targetGroupID || !groups.some((group) => group.id === targetGroupID)) return
     if (selectedGroupID !== targetGroupID) setSelectedGroupID(targetGroupID)
     setConfigTab("routes")
   }, [groups, selectedGroupID, targetGroupID])
@@ -1379,15 +1358,11 @@ export function GatewayPage() {
 
   async function syncModels() {
     if (!selectedGroup) return
-    if (preferredChangesPending) {
-      toast.error("请先保存首选线路更改，再同步模型")
-      return
-    }
     setBusy(true)
     // 未点「保存」的自定义模型也要带上，避免同步结果覆盖后丢失
     const localCustom = modelItems
       .filter((m) => m.source === "custom" && m.id.trim())
-      .map((m) => ({ ...m, id: m.id.trim(), source: "custom" as const }))
+      .map((m) => ({ id: m.id.trim(), source: "custom" as const }))
     // 输入框里尚未点「添加自定义」的 ID，一并保留
     const pendingID = customModel.trim()
     if (
@@ -1854,19 +1829,12 @@ export function GatewayPage() {
 
                     <TabsContent value="models" className="mt-0 space-y-4">
                       <ModelsPanel
-                        busy={busy || groupLoading}
+                        busy={busy}
                         modelsMode={modelsMode}
                         onModelsModeChange={setModelsMode}
                         onSyncModels={() => void syncModels()}
                         onOpenCatalog={() => void openCatalog()}
                         onSave={() => void saveGroupConfig()}
-                        hasUnsavedChanges={modelConfigDirty}
-                        preferredChangesPending={preferredChangesPending}
-                        onPreferredRouteChange={(modelID, routeID) => {
-                          setModelItems((items) => items.map((m) => m.id === modelID
-                            ? { ...m, preferred_route_id: routeID }
-                            : m))
-                        }}
                         customModel={customModel}
                         onCustomModelChange={setCustomModel}
                         onAddCustomModel={addCustomModel}
