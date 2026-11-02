@@ -262,7 +262,9 @@ export function GatewayPage() {
 
   const providerNameByID = useMemo(() => {
     const m = new Map<number, string>()
-    for (const p of providerOptions) m.set(p.id, p.name)
+    for (const p of providerOptions) {
+      if (p.enabled !== false) m.set(p.id, p.name)
+    }
     return m
   }, [providerOptions])
 

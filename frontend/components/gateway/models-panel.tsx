@@ -38,6 +38,7 @@ import {
   findSourceTest,
   resolveModelSources,
   sourceTagTone,
+  modelSourceTests,
   testBusyKey,
 } from "./gateway-utils"
 
@@ -188,7 +189,7 @@ export function ModelsPanel({
           <TableHeader>
             <TableRow>
               <TableHead className="w-[28%]">模型 ID</TableHead>
-              <TableHead className="w-[42%]">渠道-分组</TableHead>
+              <TableHead className="w-[42%]">绑定渠道</TableHead>
               <TableHead className="w-14 px-1 text-center">状态</TableHead>
               <TableHead className="w-[22%] text-right">操作</TableHead>
             </TableRow>
@@ -201,13 +202,13 @@ export function ModelsPanel({
                 channelNameByID,
                 providerNameByID,
               )
-              const tests = modelTestResults[m.id] ?? []
+              const tests = modelSourceTests(sources, modelTestResults[m.id] ?? [])
               const okN = tests.filter((t) => t.ok).length
               return (
                 <TableRow key={m.id}>
                   <TableCell className="align-top">
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <code className="max-w-full truncate text-sm" title={m.id}>
+                      <code className="max-w-full break-all text-xs sm:truncate sm:text-sm" title={m.id}>
                         {m.id}
                       </code>
                       <Badge
@@ -378,12 +379,10 @@ export function ModelsPanel({
         </Table>
       </div>
       <ul className="w-full max-w-full space-y-0.5 text-[11px] leading-5 text-muted-foreground">
-        <li>• 禁用路由不展示（不可调度）</li>
-        <li>• 未配置路由时，提示先在「路由」里配渠道并启用</li>
-        <li>• 直连 provider 会显示渠道名（有的话）或 直连 #id</li>
-        <li>
-          • 添加自定义模型后，无需再同步，即可在「渠道-分组」列看到全部渠道并直接测试
-        </li>
+        <li>仅展示该模型绑定的启用线路。颜色为最近一次测试结果，点击渠道可重新测试。</li>
+        {modelItems.some((m) => m.source === "custom" && !m.sources?.some((s) => s.route_id)) ? (
+          <li>未限定线路的旧自定义模型沿用分组默认线路。</li>
+        ) : null}
       </ul>
     </div>
 
