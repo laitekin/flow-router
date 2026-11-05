@@ -37,8 +37,6 @@ import type {
   GatewayKeyCreateResult,
   GatewayModelListItem,
   GatewayModelSyncResult,
-  GatewayModelTestResponse,
-  GatewayModelTestResult,
   GatewayProviderOption,
   GatewayRoute,
   GatewayServiceTierRule,
@@ -63,6 +61,7 @@ import { KeysPanel } from "./keys-panel"
 import { RoutesPanel } from "./routes-panel"
 import { SchedulerWorkbench } from "./scheduler-workbench"
 import { ModelsPanel } from "./models-panel"
+import { useModelTests } from "./use-model-tests"
 import { CatalogModelDialog } from "./catalog-model-dialog"
 import { UsagePanel } from "./usage-panel"
 import { PricesPanel } from "./prices-panel"
@@ -80,9 +79,9 @@ import {
   GroupFormDialog,
   KeyFormDialog,
   ModelSyncResultDialog,
-  ModelTestDialog,
   RoutePauseErrorDialog,
 } from "./gateway-dialogs"
+import { ModelTestDialog } from "./model-test-dialog"
 import {
   emptyGroupForm,
   emptyKeyForm,
@@ -96,9 +95,9 @@ import {
   perTokenToMTok,
   routeAccountRate,
   routeSourceKind,
+  resolveModelSources,
   serializePriceTiers,
   sortGatewayRouteRows,
-  testBusyKey,
   textToIPListJSON,
   type ConfigTab,
   type GroupFormState,
@@ -197,10 +196,6 @@ export function GatewayPage() {
   const [defaultPrices, setDefaultPrices] = useState<ModelDefaultPrice[]>([])
   const [defaultsLoading, setDefaultsLoading] = useState(false)
 
-  /** model id → 最近一次探测结果（列表摘要用） */
-  const [modelTestResults, setModelTestResults] = useState<
-    Record<string, GatewayModelTestResult[]>
-  >({})
   const [modelTestOpen, setModelTestOpen] = useState(false)
   const [modelSyncOpen, setModelSyncOpen] = useState(false)
   const [modelSyncResult, setModelSyncResult] = useState<GatewayModelSyncResult | null>(
@@ -214,17 +209,9 @@ export function GatewayPage() {
   const [ensureKeysResult, setEnsureKeysResult] =
     useState<GatewayEnsureKeysResult | null>(null)
   const [modelTestTarget, setModelTestTarget] = useState<GatewayModelListItem | null>(null)
-  /** null 空闲；`modelId` 批量；`modelId#routeId` 单条（列表 tag / 弹窗共用） */
-  const [modelTesting, setModelTesting] = useState<string | null>(null)
-  const [modelTestDialogResults, setModelTestDialogResults] = useState<
-    GatewayModelTestResult[]
-  >([])
   /** 路由临时暂停错误详情弹窗 */
   const [pauseErrorRoute, setPauseErrorRoute] = useState<Partial<GatewayRoute> | null>(null)
-  const modelTestTargetRef = useRef<GatewayModelListItem | null>(null)
-  modelTestTargetRef.current = modelTestTarget
-  const modelTestOpenRef = useRef(false)
-  modelTestOpenRef.current = modelTestOpen
+  const modelTests = useModelTests(selectedGroupID ?? undefined)
 
   const selectedGroup = useMemo(
     () => groups.find((g) => g.id === selectedGroupID) ?? null,
@@ -386,11 +373,8 @@ export function GatewayPage() {
       setKeys([])
       setKeySecrets({})
       setRouteDrafts([])
-      setModelTestResults({})
-      setModelTesting(null)
       setModelTestOpen(false)
       setModelTestTarget(null)
-      setModelTestDialogResults([])
       await Promise.all([loadKeys(group.id, seq), loadRoutes(group.id, seq)])
       if (seq === loadSeqRef.current) {
         setGroupLoading(false)
@@ -1475,78 +1459,16 @@ export function GatewayPage() {
 
   function openModelTest(m: GatewayModelListItem) {
     setModelTestTarget(m)
-    setModelTestDialogResults(modelTestResults[m.id] ?? [])
     setModelTestOpen(true)
   }
 
-  async function runModelTestFor(modelID: string, routeID?: number) {
-    if (!selectedGroup) return
-    if (modelTesting) return
-    const busyKey = testBusyKey(modelID, routeID)
-    setModelTesting(busyKey)
-    try {
-      const body: { model: string; route_id?: number } = { model: modelID }
-      if (routeID != null) body.route_id = routeID
-      const res = await apiFetch<GatewayModelTestResponse>(
-        `/gateway/groups/${selectedGroup.id}/models/test`,
-        { method: "POST", body: JSON.stringify(body) },
-      )
-      const items = res.items ?? []
-      setModelTestResults((prev) => {
-        const next = { ...prev }
-        if (routeID == null) {
-          next[modelID] = items
-        } else {
-          const existing = [...(prev[modelID] ?? [])]
-          for (const r of items) {
-            const idx = existing.findIndex((x) => x.route_id === r.route_id)
-            if (idx >= 0) existing[idx] = r
-            else existing.push(r)
-          }
-          next[modelID] = existing
-        }
-        return next
-      })
-      if (modelTestOpenRef.current && modelTestTargetRef.current?.id === modelID) {
-        if (routeID == null) {
-          setModelTestDialogResults(items)
-        } else {
-          setModelTestDialogResults((prev) => {
-            const merged = [...prev]
-            for (const r of items) {
-              const idx = merged.findIndex((x) => x.route_id === r.route_id)
-              if (idx >= 0) merged[idx] = r
-              else merged.push(r)
-            }
-            return merged
-          })
-        }
-      }
-      if (items.length === 0) {
-        toast.message("无可测试路由（请先确保上游密钥并启用路由）")
-      } else if (res.all_ok) {
-        toast.success(
-          routeID != null
-            ? `可用 · ${items[0]?.label ?? ""} · 首字 ${items[0]?.latency_ms ?? 0}ms`
-            : `全部可用 ${res.ok_count}/${res.total}`,
-        )
-      } else {
-        toast.error(
-          routeID != null
-            ? `不可用 · ${items[0]?.error || items[0]?.status_code || "失败"}`
-            : `部分失败 ${res.ok_count}/${res.total}`,
-        )
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "测试失败")
-    } finally {
-      setModelTesting(null)
-    }
-  }
-
-  async function runModelTest(routeID?: number) {
-    if (!modelTestTarget) return
-    await runModelTestFor(modelTestTarget.id, routeID)
+  function runModelTestFor(modelID: string, routeID?: number) {
+    const model = modelItems.find((m) => m.id === modelID)
+    if (!model) return
+    const sources = resolveModelSources(model, routeDrafts, channelNameByID, providerNameByID)
+    const routeIDs = sources.flatMap((s) => s.route_id != null && (routeID == null || routeID === s.route_id) ? [s.route_id] : [])
+    if (!routeIDs.length) { toast.error("请先保存并启用该模型的渠道路由"); return }
+    modelTests.run(modelID, routeIDs)
   }
 
   async function savePrice() {
@@ -1845,8 +1767,9 @@ export function GatewayPage() {
                         routeDrafts={routeDrafts}
                         channelNameByID={channelNameByID}
                         providerNameByID={providerNameByID}
-                        modelTestResults={modelTestResults}
-                        modelTesting={modelTesting}
+                        modelTestResults={modelTests.results}
+                        isModelTesting={modelTests.isTesting}
+                        activeTestCount={modelTests.activeCount}
                         onRunModelTestFor={(id, rid) => void runModelTestFor(id, rid)}
                         onOpenModelTest={openModelTest}
                         mappingRows={mappingRows}
@@ -1943,16 +1866,13 @@ export function GatewayPage() {
           setModelTestOpen(open)
           if (!open) {
             setModelTestTarget(null)
-            setModelTesting(null)
           }
         }}
         modelTestTarget={modelTestTarget}
-        modelTestDialogResults={modelTestDialogResults}
-        modelTesting={modelTesting}
         routeDrafts={routeDrafts}
         channelNameByID={channelNameByID}
         providerNameByID={providerNameByID}
-        onRunModelTest={(routeID) => void runModelTest(routeID)}
+        tests={modelTests}
       />
 
       <RoutePauseErrorDialog

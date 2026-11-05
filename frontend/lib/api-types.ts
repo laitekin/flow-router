@@ -790,6 +790,64 @@ export interface GatewayModelTestResponse {
   all_ok: boolean
 }
 
+export interface GatewayProbeMessage {
+  role: "system" | "user" | "assistant"
+  content: string
+}
+
+export interface GatewayProbeRound {
+  label: string
+  messages: GatewayProbeMessage[]
+}
+
+export interface GatewayProbeRequest {
+  model: string
+  route_id: number
+  protocol: "auto" | "chat" | "responses"
+  rounds: GatewayProbeRound[]
+  interval_sec: number
+  max_tokens: number
+  temperature: number | null
+  reasoning: "default" | "off" | "low" | "medium" | "high"
+  timeout_sec: number
+  continue_on_error: boolean
+}
+
+export interface GatewayProbeSample {
+  round: number
+  label: string
+  ok: boolean
+  status_code: number
+  input_tokens: number | null
+  cached_tokens: number | null
+  token_hit_rate: number | null
+  output_tokens: number | null
+  reasoning_tokens: number | null
+  first_token_ms: number | null
+  first_text_ms: number | null
+  duration_ms: number
+  output_tps: number | null
+  text: string
+  text_truncated?: boolean
+  reasoning_chars: number
+  finish_reason?: string
+  error?: string
+}
+
+export interface GatewayProbeEvent {
+  stage: "started" | "waiting" | "requesting" | "sample" | "done" | "error"
+  route_id?: number
+  label?: string
+  upstream_model?: string
+  upstream_path?: string
+  protocol?: string
+  total?: number
+  round?: number
+  wait_ms?: number
+  sample?: GatewayProbeSample
+  error?: string
+}
+
 export interface GatewayUsageLog {
   id: number
   gateway_group_id: number
