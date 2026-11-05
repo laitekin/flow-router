@@ -39,7 +39,6 @@ import {
   resolveModelSources,
   sourceTagTone,
   modelSourceTests,
-  testBusyKey,
 } from "./gateway-utils"
 
 const MODELS_MODE_OPTIONS = [
@@ -87,7 +86,8 @@ type ModelsPanelProps = {
   channelNameByID: Map<number, string>
   providerNameByID?: Map<number, string>
   modelTestResults: Record<string, GatewayModelTestResult[]>
-  modelTesting: string | null
+  isModelTesting: (model: string, routeID?: number) => boolean
+  activeTestCount: number
   onRunModelTestFor: (modelID: string, routeID?: number) => void
   onOpenModelTest: (m: GatewayModelListItem) => void
   mappingRows: MappingRow[]
@@ -111,7 +111,8 @@ export function ModelsPanel({
   channelNameByID,
   providerNameByID,
   modelTestResults,
-  modelTesting,
+  isModelTesting,
+  activeTestCount,
   onRunModelTestFor,
   onOpenModelTest,
   mappingRows,
@@ -151,6 +152,12 @@ export function ModelsPanel({
     </div>
 
     <div className="flex flex-wrap items-center gap-2">
+      {activeTestCount > 0 ? (
+        <Badge variant="secondary" className="gap-1.5" role="status">
+          <Loader2 className="size-3 animate-spin" />
+          {activeTestCount} 项测试运行或排队中
+        </Badge>
+      ) : null}
       <Input
         className="h-9 max-w-xs"
         placeholder="自定义模型 ID"
@@ -235,13 +242,13 @@ export function ModelsPanel({
                           const tone = sourceTagTone(tr)
                           const tagBusy =
                             s.route_id != null &&
-                            modelTesting === testBusyKey(m.id, s.route_id)
+                            isModelTesting(m.id, s.route_id)
                           return (
                             <Tooltip key={s.key}>
                               <TooltipTrigger asChild>
                                 <button
                                   type="button"
-                                  disabled={!!modelTesting}
+                                  disabled={tagBusy}
                                   className={cn(
                                     "inline-flex max-w-full items-center gap-1 rounded-full border px-1.5 py-0 text-left text-[11px] font-normal transition-colors",
                                     "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring",

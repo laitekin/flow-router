@@ -790,6 +790,31 @@ export interface GatewayModelTestResponse {
   all_ok: boolean
 }
 
+export interface GatewayCacheTestSample {
+  round: number
+  case: "cold" | "repeat" | "changed_tail"
+  ok: boolean
+  status_code: number
+  input_tokens: number | null
+  cached_tokens: number | null
+  token_hit_rate: number | null
+  first_text_ms: number | null
+  duration_ms: number
+  error?: string
+}
+
+export interface GatewayCacheTestEvent {
+  stage: "started" | "waiting" | "requesting" | "sample" | "done" | "error"
+  route_id?: number
+  label?: string
+  upstream_model?: string
+  upstream_path?: string
+  total?: number
+  round?: number
+  sample?: GatewayCacheTestSample
+  error?: string
+}
+
 export interface GatewayUsageLog {
   id: number
   gateway_group_id: number
