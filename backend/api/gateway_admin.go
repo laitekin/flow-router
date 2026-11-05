@@ -62,7 +62,7 @@ func registerGatewayAdmin(g *gin.RouterGroup, d *Deps) {
 		gp.POST("/groups/:id/models/sync", func(c *gin.Context) { syncGatewayGroupModels(c, d) })
 		gp.POST("/groups/:id/models/catalog-sync", func(c *gin.Context) { syncGatewayCatalogModels(c, d) })
 		gp.POST("/groups/:id/models/test", func(c *gin.Context) { testGatewayGroupModel(c, d) })
-		gp.POST("/groups/:id/models/cache-test", func(c *gin.Context) { testGatewayModelCache(c, d) })
+		gp.POST("/groups/:id/models/probe", func(c *gin.Context) { probeGatewayModel(c, d) })
 
 		// key ops
 		gp.PUT("/keys/:id", func(c *gin.Context) { updateGatewayKey(c, d) })

@@ -1,14 +1,7 @@
-import { useState } from "react"
-import type { CacheTestRun } from "./use-model-tests"
-import { CacheTestResults } from "./cache-test-results"
 import { toast } from "sonner"
 import {
-  CheckCircle2,
   Copy,
-  FlaskConical,
-  Loader2,
   Search,
-  XCircle,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -40,257 +33,19 @@ import type {
   GatewayEnsureKeysResult,
   GatewayGroup,
   GatewayKey,
-  GatewayModelListItem,
   GatewayModelSyncResult,
-  GatewayModelTestResult,
   GatewayRoute,
   ModelDefaultPrice,
 } from "@/lib/api-types"
 import {
   API_KEY_LENS,
   type APIKeyLen,
-  findSourceTest,
   isRouteTempPaused,
   perTokenToMTok,
-  resolveModelSources,
-  sourceTagTone,
-  modelSourceTests,
   type GroupFormState,
   type KeyFormState,
 } from "./gateway-utils"
 
-export function ModelTestDialog({
-  open,
-  onOpenChange,
-  modelTestTarget,
-  modelTestDialogResults,
-  isModelTesting,
-  cacheRun,
-  onRunCacheTest,
-  onCancelTest,
-  routeDrafts,
-  channelNameByID,
-  providerNameByID,
-  onRunModelTest,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  modelTestTarget: GatewayModelListItem | null
-  modelTestDialogResults: GatewayModelTestResult[]
-  isModelTesting: (model: string, routeID?: number) => boolean
-  cacheRun: (model: string, routeID: number) => CacheTestRun | undefined
-  onRunCacheTest: (model: string, routeID: number, protocol: string, interval: number) => void
-  onCancelTest: (model: string, routeID: number) => void
-  routeDrafts: Partial<GatewayRoute>[]
-  channelNameByID: Map<number, string>
-  providerNameByID?: Map<number, string>
-  onRunModelTest: (routeID?: number) => void
-}) {
-  const [cacheProtocol, setCacheProtocol] = useState("auto")
-  const [cacheInterval, setCacheInterval] = useState(5)
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        onOpenChange(next)
-      }}
-    >
-      <DialogContent className="flex max-h-[min(85dvh,720px)] w-[calc(100vw-1.5rem)] max-w-2xl min-w-0 flex-col gap-3 overflow-hidden">
-        <DialogHeader className="min-w-0 shrink-0 space-y-1.5">
-          <DialogTitle className="flex items-center gap-2">
-            <FlaskConical className="size-4 shrink-0" />
-            测试模型
-          </DialogTitle>
-          <DialogDescription className="min-w-0 break-words">
-            {modelTestTarget ? (
-              <>
-                向各渠道发送最小探测，验证{" "}
-                <code className="inline-block max-w-full break-all rounded bg-muted px-1 text-xs">
-                  {modelTestTarget.id}
-                </code>{" "}
-                是否可用，或测试指定渠道的缓存命中。不同模型、线路可并发，关闭弹窗后继续运行；刷新或离开网关页会停止测试。
-              </>
-            ) : (
-              "选择模型后测试可用性"
-            )}
-          </DialogDescription>
-        </DialogHeader>
-
-        {modelTestTarget ? (
-          (() => {
-            const sources = resolveModelSources(
-              modelTestTarget,
-              routeDrafts,
-              channelNameByID,
-              providerNameByID,
-            )
-            const results = modelSourceTests(sources, modelTestDialogResults)
-            const okN = results.filter((t) => t.ok).length
-            const batchBusy =
-              isModelTesting(modelTestTarget.id)
-            return (
-              <>
-                <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-2">
-                  <div className="min-w-0 text-xs text-muted-foreground">
-                    {sources.length} 个来源
-                    {results.length > 0 ? (
-                      <span
-                        className={cn(
-                          "ml-2 font-medium",
-                          okN === results.length
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : okN > 0
-                              ? "text-amber-600 dark:text-amber-400"
-                              : "text-destructive",
-                        )}
-                      >
-                        最近 {okN}/{results.length} 可用
-                      </span>
-                    ) : null}
-                  </div>
-                  <Button
-                    size="sm"
-                    className="shrink-0"
-                    disabled={batchBusy || sources.length === 0}
-                    onClick={() => void onRunModelTest()}
-                  >
-                    {batchBusy ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <FlaskConical className="size-3.5" />
-                    )}
-                    {sources.length > 1 ? "批量测试全部" : "开始测试"}
-                  </Button>
-                </div>
-
-                <div className="shrink-0 space-y-2 rounded-md border bg-muted/20 p-3 text-xs">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Label htmlFor="cache-test-protocol" className="text-xs">缓存测试协议</Label>
-                    <select id="cache-test-protocol" className="h-8 rounded border bg-background px-2" value={cacheProtocol} onChange={(e) => setCacheProtocol(e.target.value)}>
-                      <option value="auto">跟随渠道</option><option value="responses">Responses</option><option value="chat">Chat Completions</option>
-                    </select>
-                    <Label htmlFor="cache-test-interval" className="text-xs">间隔（秒）</Label>
-                    <Input id="cache-test-interval" type="number" className="h-8 w-16" min={1} max={15} value={cacheInterval} onChange={(e) => setCacheInterval(Math.max(1, Math.min(15, Number(e.target.value) || 1)))} />
-                  </div>
-                  <p className="leading-relaxed text-muted-foreground">点击来源旁的「缓存」：发送约 4000 token 的合成输入，共 5 轮（首次、重复 2 次、修改末尾 2 次），会消耗上游额度。固定该渠道，不自动切换；缺少缓存字段显示「未报告」。</p>
-                </div>
-                <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-                  {sources.length === 0 ? (
-                    <div className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-                      暂无可用绑定。请在「渠道路由」中检查已绑定线路是否存在并启用。
-                    </div>
-                  ) : (
-                    <ul className="space-y-2">
-                      {sources.map((s) => {
-                        const tr = findSourceTest(s, results)
-                        const tone = sourceTagTone(tr)
-                        const singleBusy =
-                          s.route_id != null &&
-                          isModelTesting(modelTestTarget.id, s.route_id)
-                        return (
-                          <li
-                            key={s.key}
-                            className="min-w-0 rounded-lg border border-border bg-card p-3"
-                          >
-                            <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-                              <div className="min-w-0 flex-1 space-y-1">
-                                <Badge
-                                  variant="outline"
-                                  className={cn(
-                                    "max-w-full whitespace-normal break-all px-1.5 py-0.5 text-[11px] font-normal",
-                                    tone.className,
-                                  )}
-                                >
-                                  {s.label}
-                                </Badge>
-                                {tr?.upstream_model &&
-                                tr.upstream_model !== modelTestTarget.id ? (
-                                  <div className="break-all text-[11px] text-muted-foreground">
-                                    上游 {tr.upstream_model}
-                                  </div>
-                                ) : null}
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="shrink-0"
-                                disabled={singleBusy || s.route_id == null}
-                                title={
-                                  s.route_id == null
-                                    ? "缺少路由 ID，请重新同步模型"
-                                    : undefined
-                                }
-                                onClick={() =>
-                                  s.route_id != null && void onRunModelTest(s.route_id)
-                                }
-                              >
-                                {singleBusy ? (
-                                  <Loader2 className="size-3.5 animate-spin" />
-                                ) : (
-                                  <FlaskConical className="size-3.5" />
-                                )}
-                                可用性
-                              </Button>
-                              <Button size="sm" variant="outline" className="shrink-0" disabled={singleBusy || s.route_id == null}
-                                onClick={() => s.route_id != null && onRunCacheTest(modelTestTarget.id, s.route_id, cacheProtocol, cacheInterval)}>
-                                缓存
-                              </Button>
-                              {singleBusy && s.route_id != null ? <Button size="sm" variant="ghost" onClick={() => onCancelTest(modelTestTarget.id, s.route_id!)}>中止</Button> : null}
-                            </div>
-
-                            <div className="mt-2 min-w-0">
-                              {!tr ? (
-                                <span className="text-xs text-muted-foreground">未测试</span>
-                              ) : tr.ok ? (
-                                <div className="space-y-0.5 text-xs">
-                                  <div className="inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
-                                    <CheckCircle2 className="size-3.5 shrink-0" />
-                                    可用 · 首字 {tr.latency_ms}ms
-                                    {tr.status_code ? ` · HTTP ${tr.status_code}` : ""}
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="min-w-0 space-y-1.5 text-xs">
-                                  <div className="inline-flex items-center gap-1 font-medium text-destructive">
-                                    <XCircle className="size-3.5 shrink-0" />
-                                    失败
-                                    {tr.status_code ? ` · ${tr.status_code}` : ""}
-                                  </div>
-                                  {tr.error ? (
-                                    <pre
-                                      className="max-h-28 w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-destructive/20 bg-destructive/5 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
-                                      title={tr.error}
-                                    >
-                                      {tr.error}
-                                    </pre>
-                                  ) : null}
-                                </div>
-                              )}
-                            </div>
-                            {s.route_id != null && cacheRun(modelTestTarget.id, s.route_id) ? <CacheTestResults run={cacheRun(modelTestTarget.id, s.route_id)!} /> : null}
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )}
-                </div>
-              </>
-            )
-          })()
-        ) : null}
-
-        <DialogFooter className="shrink-0">
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            关闭
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
 export function RoutePauseErrorDialog({
   pauseErrorRoute,
   onClose,

@@ -1,14 +1,14 @@
 import { getToken, notifyUnauthorized } from "./api"
-import type { GatewayCacheTestEvent } from "./api-types"
+import type { GatewayProbeEvent, GatewayProbeRequest } from "./api-types"
 
-export async function streamModelCacheTest(
+export async function streamModelProbe(
   groupID: number,
-  body: { model: string; route_id: number; protocol: string; interval_sec: number },
+  body: GatewayProbeRequest,
   signal: AbortSignal,
-  onEvent: (event: GatewayCacheTestEvent) => void,
+  onEvent: (event: GatewayProbeEvent) => void,
 ) {
   const token = getToken()
-  const res = await fetch(`/api/gateway/groups/${groupID}/models/cache-test`, {
+  const res = await fetch(`/api/gateway/groups/${groupID}/models/probe`, {
     method: "POST",
     headers: {
       Accept: "text/event-stream",
@@ -31,9 +31,9 @@ export async function streamModelCacheTest(
   const consume = (block: string) => {
     const data = block.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n")
     if (!data) return
-    const ev = JSON.parse(data) as GatewayCacheTestEvent
+    const ev = JSON.parse(data) as GatewayProbeEvent
     onEvent(ev)
-    if (ev.stage === "error") throw new Error(ev.error || "缓存测试失败")
+    if (ev.stage === "error") throw new Error(ev.error || "测试失败")
     if (ev.stage === "done") finished = true
   }
   try {

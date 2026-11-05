@@ -79,9 +79,9 @@ import {
   GroupFormDialog,
   KeyFormDialog,
   ModelSyncResultDialog,
-  ModelTestDialog,
   RoutePauseErrorDialog,
 } from "./gateway-dialogs"
+import { ModelTestDialog } from "./model-test-dialog"
 import {
   emptyGroupForm,
   emptyKeyForm,
@@ -1869,15 +1869,10 @@ export function GatewayPage() {
           }
         }}
         modelTestTarget={modelTestTarget}
-        modelTestDialogResults={modelTestTarget ? modelTests.results[modelTestTarget.id] ?? [] : []}
-        isModelTesting={modelTests.isTesting}
         routeDrafts={routeDrafts}
         channelNameByID={channelNameByID}
         providerNameByID={providerNameByID}
-        onRunModelTest={(routeID) => { if (modelTestTarget) runModelTestFor(modelTestTarget.id, routeID) }}
-        cacheRun={modelTests.cacheRun}
-        onRunCacheTest={modelTests.runCache}
-        onCancelTest={modelTests.cancel}
+        tests={modelTests}
       />
 
       <RoutePauseErrorDialog

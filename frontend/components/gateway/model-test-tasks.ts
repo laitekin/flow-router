@@ -6,6 +6,14 @@ export class ModelTestPool {
 
   constructor(limit = 3) { this.limit = limit }
 
+  get concurrency() { return this.limit }
+
+  /** Raising the limit starts queued jobs immediately; lowering it lets running jobs finish. */
+  setLimit(limit: number) {
+    this.limit = Math.max(1, Math.floor(limit))
+    while (this.active < this.limit && this.waiting.length) this.waiting.shift()!()
+  }
+
   async run<T>(signal: AbortSignal, task: () => Promise<T>): Promise<T> {
     if (signal.aborted) throw new DOMException("Cancelled", "AbortError")
     await new Promise<void>((resolve, reject) => {
@@ -34,6 +42,12 @@ export class ModelTestPool {
   }
 }
 
-export function modelTaskKey(groupID: number, model: string, routeID: number) {
-  return JSON.stringify([groupID, model, routeID])
+/** testID "" is the quick availability check; other IDs are probe templates. */
+export function modelTaskKey(groupID: number, model: string, routeID: number, testID = "") {
+  return JSON.stringify([groupID, model, routeID, testID])
+}
+
+export function parseModelTaskKey(key: string) {
+  const [groupID, model, routeID, testID = ""] = JSON.parse(key) as [number, string, number, string?]
+  return { groupID, model, routeID, testID }
 }
