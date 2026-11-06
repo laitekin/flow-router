@@ -3,6 +3,7 @@ import type {
   GatewayModelTestResult,
   GatewayProviderOption,
   GatewayRoute,
+  GatewayRouteCooldownState,
   GatewayRouteSourceKind,
   GatewayServiceTierRule,
   GatewaySystemPromptRule,
@@ -694,4 +695,72 @@ export const emptyPriceForm = (): PriceFormState => ({
 /** busy key: modelId 批量 / modelId#routeId 单条 */
 export function testBusyKey(modelID: string, routeID?: number) {
   return routeID != null ? `${modelID}#${routeID}` : modelID
+}
+
+/** 路由是否有密钥冷却或模型冷却（不含普通暂停，暂停用 isRouteTempPaused） */
+export function hasRouteCooldown(
+  state: GatewayRouteCooldownState | undefined,
+): boolean {
+  return !!(state && (state.credential || (state.models?.length ?? 0) > 0))
+}
+
+function shortTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+}
+
+/** 冷却徽标文案，如「密钥冷却 · 12:30:00」「模型冷却 2」 */
+export function routeCooldownLabels(
+  state: GatewayRouteCooldownState | undefined,
+): { label: string; title: string }[] {
+  const out: { label: string; title: string }[] = []
+  if (!state) return out
+  if (state.credential) {
+    const c = state.credential
+    out.push({
+      label: `密钥冷却 · ${shortTime(c.until)}`,
+      title: [
+        `余额不足触发，冷却至 ${new Date(c.until).toLocaleString("zh-CN")}`,
+        `连续失败 ${c.failures} 次`,
+        c.trigger_route_id && c.trigger_route_id !== state.route_id
+          ? `由共享同一密钥的路由 #${c.trigger_route_id} 触发`
+          : "",
+        c.request_id ? `request_id: ${c.request_id}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    })
+  }
+  const models = state.models ?? []
+  if (models.length > 0) {
+    out.push({
+      label: models.length === 1 ? `模型冷却 · ${models[0].model}` : `模型冷却 ${models.length}`,
+      title: models
+        .map((m) => `${m.model} 至 ${shortTime(m.until)}${m.reason ? `：${m.reason}` : ""}`)
+        .join("\n"),
+    })
+  }
+  return out
+}
+
+/** 把探测失败翻译成可操作的原因 */
+export function describeProbeFailure(t: {
+  status_code: number
+  error?: string
+}): string {
+  const err = (t.error ?? "").trim()
+  const lower = err.toLowerCase()
+  let hint = ""
+  if (/insufficient|balance|quota|credit|余额|额度/.test(lower)) hint = "余额/额度仍不足"
+  else if (t.status_code === 401) hint = "密钥无效或已失效"
+  else if (t.status_code === 403) hint = "无权限或密钥被禁用"
+  else if (t.status_code === 404) hint = "模型或接口不存在"
+  else if (t.status_code === 429) hint = "上游限流"
+  else if (t.status_code >= 500) hint = "上游服务异常"
+  else if (t.status_code === 0) hint = "连接失败或超时"
+  const status = t.status_code ? `HTTP ${t.status_code}` : ""
+  return [hint, status, err].filter(Boolean).join(" · ")
 }

@@ -736,6 +736,40 @@ export interface GatewayModelTestResult {
   error?: string
 }
 
+/** 路由当前仍生效的冷却（GET /gateway/groups/:id/route-cooldowns） */
+export interface GatewayRouteCooldownState {
+  route_id: number
+  /** 普通失败触发的路由暂停 */
+  pause_until?: string
+  /** 余额不足触发的密钥冷却；端点+凭据相同的路由共享 */
+  credential?: {
+    until: string
+    failures: number
+    reason: string
+    request_id?: string
+    last_failure_at: string
+    trigger_route_id?: number
+  }
+  /** 该路由上单个模型的冷却 */
+  models?: {
+    model: string
+    until: string
+    failures: number
+    reason?: string
+    request_id?: string
+  }[]
+}
+
+/** POST /gateway/routes/:id/release-cooldown：先测试，成功后才解除 */
+export interface GatewayReleaseCooldownResult {
+  released: boolean
+  tests: GatewayModelTestResult[]
+  cleared_pause: boolean
+  cleared_credential: boolean
+  cleared_models?: string[]
+  remaining?: GatewayRouteCooldownState
+}
+
 export interface GatewayModelSyncRouteResult {
   route_id: number
   source_kind: string

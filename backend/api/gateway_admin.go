@@ -39,6 +39,7 @@ func registerGatewayAdmin(g *gin.RouterGroup, d *Deps) {
 		gp.GET("/groups/:id/routes", func(c *gin.Context) { listGatewayGroupRoutes(c, d) })
 		gp.PUT("/groups/:id/routes", func(c *gin.Context) { saveGatewayGroupRoutes(c, d) })
 		gp.POST("/groups/:id/routes/ensure-keys", func(c *gin.Context) { ensureGatewayGroupRouteKeys(c, d) })
+		gp.GET("/groups/:id/route-cooldowns", func(c *gin.Context) { listGatewayRouteCooldowns(c, d) })
 
 		// models
 		gp.GET("/models/catalog", func(c *gin.Context) { listGatewayModelCatalog(c, d) })
@@ -71,6 +72,7 @@ func registerGatewayAdmin(g *gin.RouterGroup, d *Deps) {
 
 		// route ops
 		gp.POST("/routes/:id/clear-pause", func(c *gin.Context) { clearGatewayRoutePause(c, d) })
+		gp.POST("/routes/:id/release-cooldown", func(c *gin.Context) { releaseGatewayRouteCooldown(c, d) })
 
 		// providers（直连渠道）— options 须在 :id 之前注册
 		gp.GET("/providers/options", func(c *gin.Context) { listGatewayProviderOptions(c, d) })
@@ -689,6 +691,46 @@ func clearGatewayRoutePause(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func listGatewayRouteCooldowns(c *gin.Context, d *Deps) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	items, err := d.Gateway.RouteCooldowns(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+// releaseGatewayRouteCooldown 先测试、成功后再解除；测试失败返回 200 + released=false 与具体原因。
+func releaseGatewayRouteCooldown(c *gin.Context, d *Deps) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in gateway.ReleaseCooldownInput
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	res, err := d.Gateway.ReleaseRouteCooldown(c.Request.Context(), id, in)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, res)
 }
 
 func parseGatewayUsageQuery(c *gin.Context) storage.GatewayUsageQuery {
