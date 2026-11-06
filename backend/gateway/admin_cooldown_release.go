@@ -172,7 +172,7 @@ func (a *AdminService) ReleaseRouteCooldown(ctx context.Context, routeID uint, i
 		wg.Add(1)
 		go func(i int, model string) {
 			defer wg.Done()
-			tests[i] = a.probeRouteModel(ctx, group, *route, model, groupMapping)
+			tests[i] = a.probeRouteModel(ctx, group, *route, model, groupMapping, "")
 		}(i, model)
 	}
 	wg.Wait()

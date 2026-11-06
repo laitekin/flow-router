@@ -250,6 +250,8 @@ type SyncGroupModelsInput struct {
 type TestModelInput struct {
 	Model   string `json:"model"`
 	RouteID *uint  `json:"route_id"` // 指定则只测该路由；省略则测所有可调度路由
+	// Mode auto（默认，按模型名识别生图模型）| chat | image
+	Mode string `json:"mode"`
 }
 
 // ModelTestResult 单条路由探测结果。

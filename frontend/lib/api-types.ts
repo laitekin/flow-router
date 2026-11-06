@@ -837,7 +837,10 @@ export interface GatewayProbeRound {
 export interface GatewayProbeRequest {
   model: string
   route_id: number
-  protocol: "auto" | "chat" | "responses"
+  /** image = /v1/images/generations；auto 下生图模型自动走 image */
+  protocol: "auto" | "chat" | "responses" | "image"
+  /** 生图尺寸，如 1024x1024；仅 image 使用 */
+  image_size?: string
   rounds: GatewayProbeRound[]
   interval_sec: number
   max_tokens: number
@@ -866,6 +869,9 @@ export interface GatewayProbeSample {
   reasoning_chars: number
   finish_reason?: string
   error?: string
+  /** 生图返回的图片（URL 或 data URI）；超出回传上限的项为空串 */
+  images?: string[]
+  images_truncated?: boolean
 }
 
 export interface GatewayProbeEvent {

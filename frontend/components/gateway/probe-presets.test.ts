@@ -154,3 +154,29 @@ test("cache verdict judges warm rounds: unreported is unknown, zero hits fail", 
   assert.equal(runVerdict("cache", [cold], "", ""), "unknown")
   assert.equal(runVerdict("cache", [sample({ ok: false })], "", ""), "fail")
 })
+
+test("image template sends image protocol and size", () => {
+  const t = { ...tpl("builtin:image"), imageSize: "1536x1024" }
+  const plan = buildProbePlan(t, "00ff00ff00ff00ff")
+  const req = buildProbeRequest(t, plan, "gpt-image-1", 7)
+  assert.equal(req.protocol, "image")
+  assert.equal(req.image_size, "1536x1024")
+  assert.match(plan.rounds[0].messages.at(-1)!.content, /pelican/)
+  const plain = buildProbeRequest(tpl("builtin:image"), plan, "gpt-image-1", 7)
+  assert.equal("image_size" in plain, false)
+})
+
+test("image view checks returned images", () => {
+  assert.equal(evaluateSample("image", sample({ images: ["data:image/png;base64,aGk="] }), "", "")[0].status, "pass")
+  assert.equal(evaluateSample("image", sample({ images: [] }), "", "")[0].status, "fail")
+  // auto 协议跑生图模型时视图可能是 text，有图片同样按图片判定
+  assert.equal(evaluateSample("text", sample({ images: ["https://x/a.png"] }), "", "")[0].label, "图片")
+})
+
+test("normalizeTemplate keeps image settings and rejects bad sizes", () => {
+  const ok = normalizeTemplate({ name: "x", protocol: "image", view: "image", imageSize: "1024x1536" })
+  assert.equal(ok.protocol, "image")
+  assert.equal(ok.view, "image")
+  assert.equal(ok.imageSize, "1024x1536")
+  assert.equal(normalizeTemplate({ name: "x", imageSize: "huge" }).imageSize, undefined)
+})

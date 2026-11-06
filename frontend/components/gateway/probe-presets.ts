@@ -7,7 +7,7 @@ import type { GatewayProbeRequest, GatewayProbeRound, GatewayProbeSample } from 
  * built-ins and save their own variants without backend changes.
  */
 export type ProbeKind = "prompt" | "cache" | "needle"
-export type ProbeView = "text" | "svg" | "html" | "json" | "speed" | "cache"
+export type ProbeView = "text" | "svg" | "html" | "json" | "speed" | "cache" | "image"
 export type ProbeReasoning = GatewayProbeRequest["reasoning"]
 export type ProbeProtocol = GatewayProbeRequest["protocol"]
 
@@ -41,6 +41,8 @@ export interface ProbeTemplate {
   /** needle: haystack size and where the needle sits (0 = start, 100 = end) */
   haystackTokens: number
   needleDepth: number
+  /** image 协议的生图尺寸，空 = 1024x1024 */
+  imageSize?: string
 }
 
 export const VIEW_LABELS: Record<ProbeView, string> = {
@@ -50,6 +52,7 @@ export const VIEW_LABELS: Record<ProbeView, string> = {
   json: "JSON",
   speed: "速度",
   cache: "缓存",
+  image: "生成图片",
 }
 
 export const REASONING_LABELS: Record<ProbeReasoning, string> = {
@@ -154,6 +157,17 @@ const BUILTIN_LIST: ProbeTemplate[] = [
   },
   {
     ...BASE,
+    id: "builtin:image",
+    name: "生图",
+    description: "调用 /v1/images/generations 生成一张图并直接预览，适合 gpt-image、dall-e、flux、seedream 等生图模型。",
+    kind: "prompt",
+    view: "image",
+    protocol: "image",
+    prompt: "A pelican riding a bicycle along a seaside road, flat vector illustration, bright colors.",
+    timeoutSec: 240,
+  },
+  {
+    ...BASE,
     id: "builtin:custom",
     name: "自定义",
     description: "自己写系统提示词和问题，可选呈现方式与自动校验（包含文本或 /正则/）。",
@@ -196,11 +210,11 @@ export function normalizeTemplate(raw: Partial<ProbeTemplate> & Record<string, u
     description: str(raw.description, 300),
     builtin: raw.builtin === true ? true : undefined,
     kind,
-    view: kind === "cache" ? "cache" : oneOf(raw.view, ["text", "svg", "html", "json", "speed"] as const, "text"),
+    view: kind === "cache" ? "cache" : oneOf(raw.view, ["text", "svg", "html", "json", "speed", "image"] as const, "text"),
     system: str(raw.system, 200_000),
     prompt: str(raw.prompt, 200_000),
     repeat: clampInt(raw.repeat, L.repeat[0], L.repeat[1], BASE.repeat),
-    protocol: oneOf(raw.protocol, ["auto", "chat", "responses"] as const, "auto"),
+    protocol: oneOf(raw.protocol, ["auto", "chat", "responses", "image"] as const, "auto"),
     maxTokens: clampInt(raw.maxTokens, L.maxTokens[0], L.maxTokens[1], BASE.maxTokens),
     temperature: temp != null && Number.isFinite(temp) ? Math.min(2, Math.max(0, temp)) : null,
     reasoning: oneOf(raw.reasoning, ["default", "off", "low", "medium", "high"] as const, "default"),
@@ -214,6 +228,7 @@ export function normalizeTemplate(raw: Partial<ProbeTemplate> & Record<string, u
     changedRounds: clampInt(raw.changedRounds, L.changedRounds[0], L.changedRounds[1], BASE.changedRounds),
     haystackTokens: clampInt(raw.haystackTokens, L.haystackTokens[0], L.haystackTokens[1], BASE.haystackTokens),
     needleDepth: clampInt(raw.needleDepth, L.needleDepth[0], L.needleDepth[1], BASE.needleDepth),
+    imageSize: /^(auto|\d{3,4}x\d{3,4})$/.test(str(raw.imageSize, 16).trim()) ? str(raw.imageSize, 16).trim() : undefined,
   }
 }
 
@@ -296,6 +311,7 @@ export function buildProbeRequest(t: ProbeTemplate, plan: ProbePlan, model: stri
     model,
     route_id: routeID,
     protocol: t.protocol,
+    ...(t.imageSize ? { image_size: t.imageSize } : {}),
     rounds: plan.rounds,
     interval_sec: t.intervalSec,
     max_tokens: t.maxTokens,
@@ -372,6 +388,11 @@ export interface ProbeCheck {
 export function evaluateSample(view: ProbeView, sample: GatewayProbeSample, expect: string, jsonKeys: string): ProbeCheck[] {
   if (!sample.ok) return [{ label: "请求", status: "fail", detail: sample.error || `HTTP ${sample.status_code || "—"}` }]
   const checks: ProbeCheck[] = []
+  if (view === "image" || (sample.images?.length ?? 0) > 0) {
+    const n = sample.images?.length ?? 0
+    checks.push(n > 0 ? { label: "图片", status: "pass", detail: n > 1 ? `${n} 张` : undefined } : { label: "图片", status: "fail", detail: "上游未返回图片" })
+    return checks
+  }
   if (view === "svg") {
     const svg = extractSvg(sample.text)
     checks.push(svg ? { label: "SVG", status: "pass" } : { label: "SVG", status: "fail", detail: sample.text_truncated ? "输出被截断" : "没有完整的 <svg>…</svg>" })

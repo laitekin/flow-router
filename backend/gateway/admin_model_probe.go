@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,8 @@ const (
 	probeMaxIntervalSec   = 120
 )
 
+var probeImageSizePattern = regexp.MustCompile(`^(auto|\d{3,4}x\d{3,4})$`)
+
 type ProbeMessage struct {
 	Role    string `json:"role"` // system | user | assistant
 	Content string `json:"content"`
@@ -46,9 +49,11 @@ type ProbeRound struct {
 }
 
 type ModelProbeInput struct {
-	Model       string       `json:"model"`
-	RouteID     uint         `json:"route_id"`
-	Protocol    string       `json:"protocol"` // auto | chat | responses
+	Model    string `json:"model"`
+	RouteID  uint   `json:"route_id"`
+	Protocol string `json:"protocol"` // auto | chat | responses | image（auto 下生图模型自动走 image）
+	// ImageSize 生图尺寸，如 1024x1024；为空用默认。仅 image 协议使用。
+	ImageSize   string       `json:"image_size"`
 	Rounds      []ProbeRound `json:"rounds"`
 	IntervalSec *int         `json:"interval_sec"` // pause before every round after the first
 	MaxTokens   int          `json:"max_tokens"`
@@ -79,6 +84,9 @@ type ModelProbeSample struct {
 	ReasoningChars  int      `json:"reasoning_chars"`
 	FinishReason    string   `json:"finish_reason,omitempty"`
 	Error           string   `json:"error,omitempty"`
+	// Images 生图轮次返回的图片（URL 或 data URI）；超出回传上限的项为空字符串。
+	Images          []string `json:"images,omitempty"`
+	ImagesTruncated bool     `json:"images_truncated,omitempty"`
 }
 
 type ModelProbeEvent struct {
@@ -108,9 +116,13 @@ func normalizeProbeInput(in *ModelProbeInput) error {
 		return errors.New("model and route_id are required")
 	}
 	switch in.Protocol {
-	case "", "auto", "chat", "responses":
+	case "", "auto", "chat", "responses", "image":
 	default:
-		return errors.New("protocol must be auto, chat or responses")
+		return errors.New("protocol must be auto, chat, responses or image")
+	}
+	in.ImageSize = strings.TrimSpace(in.ImageSize)
+	if in.ImageSize != "" && !probeImageSizePattern.MatchString(in.ImageSize) {
+		return errors.New("image_size must look like 1024x1024 or auto")
 	}
 	switch in.Reasoning {
 	case "", "default", "off", "low", "medium", "high":
@@ -220,6 +232,11 @@ func (a *AdminService) probeModel(parent context.Context, groupID uint, in Model
 		routeProto = a.normalizeProviderProtocol(target.Provider.UpstreamProtocol)
 	}
 	kind := protocol.ResolveUpstream(routeProto, inbound, upstreamModel)
+	imageMode := in.Protocol == "image" || ((in.Protocol == "" || in.Protocol == "auto") && isImageGenerationModel(upstreamModel))
+	protoLabel := string(kind)
+	if imageMode {
+		protoLabel = "image"
+	}
 
 	total := len(in.Rounds)
 	budget := time.Duration(total)*time.Duration(in.TimeoutSec+interval)*time.Second + 30*time.Second
@@ -227,7 +244,7 @@ func (a *AdminService) probeModel(parent context.Context, groupID uint, in Model
 	defer cancel()
 	client := a.httpClientForTarget(target.Channel, target.Provider)
 	defer client.CloseIdleConnections()
-	if err := emit(ModelProbeEvent{Stage: "started", RouteID: selected.ID, Label: label, UpstreamModel: upstreamModel, Protocol: string(kind), Total: total}); err != nil {
+	if err := emit(ModelProbeEvent{Stage: "started", RouteID: selected.ID, Label: label, UpstreamModel: upstreamModel, Protocol: protoLabel, Total: total}); err != nil {
 		return err
 	}
 	for i, round := range in.Rounds {
@@ -250,11 +267,23 @@ func (a *AdminService) probeModel(parent context.Context, groupID uint, in Model
 		if err := emit(ModelProbeEvent{Stage: "requesting", Round: n, Total: total}); err != nil {
 			return err
 		}
-		body, path, err := a.probeBody(in, round.Messages, upstreamModel, kind)
-		if err != nil {
-			return err
+		var sample ModelProbeSample
+		var path string
+		if imageMode {
+			body, err := imageProbeBody(upstreamModel, imagePromptFromMessages(round.Messages), in.ImageSize)
+			if err != nil {
+				return err
+			}
+			path = imageProbePath
+			sample = a.probeImageRequest(ctx, client, target, body, time.Duration(in.TimeoutSec)*time.Second)
+		} else {
+			body, p, err := a.probeBody(in, round.Messages, upstreamModel, kind)
+			if err != nil {
+				return err
+			}
+			path = p
+			sample = a.probeRequest(ctx, client, target, body, path, kind, time.Duration(in.TimeoutSec)*time.Second)
 		}
-		sample := a.probeRequest(ctx, client, target, body, path, kind, time.Duration(in.TimeoutSec)*time.Second)
 		sample.Round, sample.Label = n, round.Label
 		if ctx.Err() != nil && parent.Err() != nil {
 			return parent.Err()

@@ -415,6 +415,11 @@ func (a *AdminService) TestGroupModel(ctx context.Context, groupID uint, in Test
 	if model == "" {
 		return nil, errors.New("model is required")
 	}
+	switch in.Mode {
+	case "", "auto", "chat", "image":
+	default:
+		return nil, errors.New("mode must be auto, chat or image")
+	}
 	group, err := a.Groups.FindByID(groupID)
 	if err != nil {
 		return nil, err
@@ -464,7 +469,7 @@ func (a *AdminService) TestGroupModel(ctx context.Context, groupID uint, in Test
 	// 限制并发避免瞬时打爆上游或本机连接池。
 	results := make([]ModelTestResult, len(targets))
 	if len(targets) == 1 {
-		results[0] = a.probeRouteModel(ctx, group, targets[0], model, groupMapping)
+		results[0] = a.probeRouteModel(ctx, group, targets[0], model, groupMapping, in.Mode)
 		return results, nil
 	}
 	sem := make(chan struct{}, a.gatewayRuntime().RouteBatchConcurrency)
@@ -489,7 +494,7 @@ func (a *AdminService) TestGroupModel(ctx context.Context, groupID uint, in Test
 				}
 				return
 			}
-			results[i] = a.probeRouteModel(ctx, group, route, model, groupMapping)
+			results[i] = a.probeRouteModel(ctx, group, route, model, groupMapping, in.Mode)
 		}()
 	}
 	wg.Wait()
@@ -502,6 +507,7 @@ func (a *AdminService) probeRouteModel(
 	route storage.GatewayRoute,
 	requestedModel string,
 	groupMapping map[string]string,
+	mode string,
 ) ModelTestResult {
 	routeMapping := ParseModelMapping(route.ModelMappingJSON)
 	upstreamModel, _ := ResolveModel(requestedModel, routeMapping, groupMapping)
@@ -534,6 +540,14 @@ func (a *AdminService) probeRouteModel(
 	} else if target.Channel != nil {
 		res.ChannelName = target.Channel.Name
 		res.Label = a.formatChannelGroupLabel(target.Channel.Name, route.SourceGroupName, route.SourceChannelID)
+	}
+
+	// 生图模型走 images/generations；上游无该端点时回退聊天 ping
+	if mode == "image" || (mode != "chat" && isImageGenerationModel(upstreamModel)) {
+		if fallback := a.probeRouteImage(parent, target, &res, upstreamModel); !fallback {
+			return res
+		}
+		res.StatusCode, res.LatencyMS, res.Error, res.UpstreamPath = 0, 0, "", ""
 	}
 
 	// 默认按 OpenAI Chat 入站协议探测

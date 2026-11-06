@@ -166,8 +166,8 @@ func (s *Service) TestGroupModel(ctx context.Context, groupID uint, in TestModel
 	return s.admin().TestGroupModel(ctx, groupID, in)
 }
 
-func (s *Service) probeRouteModel(parent context.Context, group *storage.GatewayGroup, route storage.GatewayRoute, requestedModel string, groupMapping map[string]string) ModelTestResult {
-	return s.admin().probeRouteModel(parent, group, route, requestedModel, groupMapping)
+func (s *Service) probeRouteModel(parent context.Context, group *storage.GatewayGroup, route storage.GatewayRoute, requestedModel string, groupMapping map[string]string, mode string) ModelTestResult {
+	return s.admin().probeRouteModel(parent, group, route, requestedModel, groupMapping, mode)
 }
 
 func (s *Service) invalidateModelsCache(groupID uint) {

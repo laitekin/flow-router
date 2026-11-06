@@ -128,7 +128,7 @@ function TemplateEditor({ draft, onChange }: { draft: ProbeTemplate; onChange: (
           <div className="space-y-1">
             <Label htmlFor="pt-view" className="text-[11px] text-muted-foreground">呈现方式</Label>
             <select id="pt-view" className={selectCls} value={draft.view} onChange={(e) => onChange({ view: e.target.value as ProbeView })}>
-              {(["text", "svg", "html", "json", "speed"] as const).map((v) => <option key={v} value={v}>{VIEW_LABELS[v]}</option>)}
+              {(["text", "svg", "html", "json", "speed", "image"] as const).map((v) => <option key={v} value={v}>{VIEW_LABELS[v]}</option>)}
             </select>
           </div>
           <div className="space-y-1">
@@ -151,8 +151,23 @@ function TemplateEditor({ draft, onChange }: { draft: ProbeTemplate; onChange: (
             <option value="auto">跟随渠道</option>
             <option value="chat">Chat Completions</option>
             <option value="responses">Responses</option>
+            <option value="image">生图 Images</option>
           </select>
         </div>
+        {draft.protocol === "image" || draft.view === "image" ? (
+          <div className="space-y-1">
+            <Label htmlFor="pt-size" className="text-[11px] text-muted-foreground">图片尺寸</Label>
+            <select id="pt-size" className={selectCls} value={draft.imageSize ?? ""} onChange={(e) => onChange({ imageSize: e.target.value || undefined })}>
+              <option value="">1024x1024（默认）</option>
+              <option value="auto">auto</option>
+              <option value="1024x1536">1024x1536 竖版</option>
+              <option value="1536x1024">1536x1024 横版</option>
+              <option value="1792x1024">1792x1024（dall-e-3）</option>
+              <option value="512x512">512x512</option>
+              <option value="256x256">256x256（dall-e-2）</option>
+            </select>
+          </div>
+        ) : null}
         <div className="space-y-1">
           <Label htmlFor="pt-reason" className="text-[11px] text-muted-foreground">推理强度</Label>
           <select id="pt-reason" className={selectCls} value={draft.reasoning} onChange={(e) => onChange({ reasoning: e.target.value as ProbeTemplate["reasoning"] })}>
