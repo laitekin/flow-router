@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -125,6 +126,20 @@ func (rt *Runtime) coolCredential(target *upstreamTarget, routeID uint, reqID st
 		}
 		return nil
 	}
+	if rt.BalanceAlerts != nil {
+		ev := CredentialExhaustedEvent{RouteID: routeID, ProviderID: providerID, RequestID: reqID}
+		if row != nil {
+			ev.Until, ev.Failures = row.Until, row.Failures
+		}
+		if target != nil && target.Channel != nil {
+			ev.ChannelID = target.Channel.ID
+		}
+		if group != nil {
+			ev.GroupID, ev.GroupName = group.ID, group.Name
+		}
+		// 通知可能走外网，绝不阻塞转发链路
+		go rt.BalanceAlerts.ReportCredentialExhausted(context.Background(), ev)
+	}
 	if row == nil {
 		return nil
 	}
@@ -132,4 +147,21 @@ func (rt *Runtime) coolCredential(target *upstreamTarget, routeID uint, reqID st
 		rt.Log.Warn("gateway credential cooldown started", "request_id", reqID, "route_id", routeID, "provider_id", providerID, "failure_class", "balance_exhausted", "failures", row.Failures, "cooldown_until", row.Until)
 	}
 	return &row.Until
+}
+
+// CredentialExhaustedEvent 一次「余额 / 额度不足」触发密钥冷却。
+type CredentialExhaustedEvent struct {
+	RouteID    uint
+	ChannelID  uint // 监控渠道路由
+	ProviderID uint // 直连渠道路由
+	GroupID    uint
+	GroupName  string
+	RequestID  string
+	Until      time.Time
+	Failures   int
+}
+
+// CredentialExhaustedReporter 由余额提醒服务实现；gateway 不依赖其具体包，避免循环引用。
+type CredentialExhaustedReporter interface {
+	ReportCredentialExhausted(ctx context.Context, ev CredentialExhaustedEvent)
 }

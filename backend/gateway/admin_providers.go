@@ -41,6 +41,9 @@ func (a *AdminService) CreateProvider(in CreateProviderInput) (*storage.GatewayP
 	if key == "" {
 		return nil, errors.New("api_key is required")
 	}
+	if err := storage.ValidateRechargeURL(in.RechargeURL); err != nil {
+		return nil, err
+	}
 	if _, err := a.Providers.FindByName(name); err == nil {
 		return nil, errors.New("provider name already exists")
 	}
@@ -72,6 +75,8 @@ func (a *AdminService) CreateProvider(in CreateProviderInput) (*storage.GatewayP
 		ProxyEnabled:       proxyEnabled,
 		ExtraHeadersJSON:   strings.TrimSpace(in.ExtraHeadersJSON),
 		Notes:              strings.TrimSpace(in.Notes),
+		RechargeURL:        strings.TrimSpace(in.RechargeURL),
+		BudgetThreshold:    max(in.BudgetThreshold, 0),
 	}
 	if err := a.Providers.Create(item); err != nil {
 		return nil, err
@@ -142,6 +147,15 @@ func (a *AdminService) UpdateProvider(id uint, in UpdateProviderInput) (*storage
 	}
 	if in.Notes != nil {
 		item.Notes = strings.TrimSpace(*in.Notes)
+	}
+	if in.RechargeURL != nil {
+		if err := storage.ValidateRechargeURL(*in.RechargeURL); err != nil {
+			return nil, err
+		}
+		item.RechargeURL = strings.TrimSpace(*in.RechargeURL)
+	}
+	if in.BudgetThreshold != nil {
+		item.BudgetThreshold = max(*in.BudgetThreshold, 0)
 	}
 	if err := a.Providers.Update(item); err != nil {
 		return nil, err

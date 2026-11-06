@@ -145,17 +145,7 @@ func (m *Manager) ApplyFromFile() (*ApplyResult, error) {
 	}
 
 	if dispatcher != nil {
-		dispatcher.UpdatePolicy(notify.Policy{
-			NotificationPrefix:                       cfg.App.NotificationPrefix,
-			MinChangePct:                             cfg.Notifications.MinChangePct,
-			BalanceLowCooldown:                       time.Duration(cfg.Notifications.BalanceLowCooldownMinutes) * time.Minute,
-			SubscriptionDailyRemainingThresholdPct:   cfg.Notifications.SubscriptionDailyRemainingThresholdPct,
-			SubscriptionWeeklyRemainingThresholdPct:  cfg.Notifications.SubscriptionWeeklyRemainingThresholdPct,
-			SubscriptionMonthlyRemainingThresholdPct: cfg.Notifications.SubscriptionMonthlyRemainingThresholdPct,
-			SubscriptionExpiryThreshold:              time.Duration(cfg.Notifications.SubscriptionExpiryThresholdHours) * time.Hour,
-			SubscriptionAlertCooldown:                time.Duration(cfg.Notifications.SubscriptionAlertCooldownMinutes) * time.Minute,
-			SendMaxAttempts:                          cfg.Notifications.SendMaxAttempts,
-		})
+		dispatcher.UpdatePolicy(notify.PolicyFromConfig(cfg.App.NotificationPrefix, cfg.Notifications))
 		dispatcher.UpdateProxyConfig(cfg.Proxy)
 	}
 	if channelSvc != nil {

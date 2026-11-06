@@ -107,6 +107,25 @@ function Source({ text, truncated }: { text: string; truncated?: boolean }) {
 function SampleBody({ run, s }: { run: ProbeRun; s: GatewayProbeSample }) {
   const view = run.template.view
   if (!s.ok && !s.text) return null
+  if (view === "image" || (s.images?.length ?? 0) > 0) {
+    // 只渲染 http(s) 与 data:image/，避免上游塞入 javascript: 等 URL
+    const images = (s.images ?? []).filter((src) => /^(https?:\/\/|data:image\/)/i.test(src))
+    return (
+      <div className="space-y-1">
+        {images.map((src, i) =>
+          src.startsWith("data:") ? (
+            <img key={i} src={src} alt={`${run.label ?? ""} ${s.label} 图片 ${i + 1}`} className="w-full rounded border bg-muted object-contain" />
+          ) : (
+            <a key={i} href={src} target="_blank" rel="noreferrer noopener" title="新标签页打开原图" className="block">
+              <img src={src} referrerPolicy="no-referrer" alt={`${run.label ?? ""} ${s.label} 图片 ${i + 1}`} className="w-full rounded border bg-muted object-contain" />
+            </a>
+          ),
+        )}
+        {s.images_truncated ? <div className="text-[11px] text-muted-foreground">部分图片过大未回传</div> : null}
+        {s.text ? <div className="text-[11px] text-muted-foreground">改写后的提示词：{s.text}</div> : null}
+      </div>
+    )
+  }
   if (view === "svg") {
     const svg = extractSvg(s.text)
     return (
@@ -236,7 +255,7 @@ export function ProbeResultView({ run, compact }: { run: ProbeRun; compact?: boo
       {view === "cache" ? <CacheSummary run={run} compact={compact} /> : null}
       {view === "speed" ? <SpeedSummary run={run} compact={compact} /> : null}
       {showSamples ? (
-        <div className={cn("grid gap-2", view === "svg" && !compact && run.samples.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+        <div className={cn("grid gap-2", (view === "svg" || view === "image") && !compact && run.samples.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
           {run.samples.map((s) => {
             const checks = evaluateSample(view, s, run.expect, run.template.jsonKeys)
             return (

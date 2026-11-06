@@ -1,5 +1,5 @@
 import { useState, type Dispatch, type SetStateAction } from "react"
-import { Check, ChevronDown, Play, Plus, Trash2 } from "lucide-react"
+import { Check, ChevronDown, Loader2, Play, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -33,6 +33,7 @@ import type {
   GatewayProviderOption,
   GatewayRateConvertMode,
   GatewayRoute,
+  GatewayRouteCooldownState,
   GatewayRouteSourceKind,
   GatewayUpstreamProtocol,
   GatewayUsageStat,
@@ -42,9 +43,11 @@ import type {
 import {
   emptyRoute,
   formatRate,
+  hasRouteCooldown,
   hasRoutePauseError,
   isRouteTempPaused,
   routeAccountRate,
+  routeCooldownLabels,
   routeSourceKind,
   sourceGroupOptionValue,
   sourceGroupSelectValue,
@@ -207,6 +210,11 @@ type RoutesPanelProps = {
   onEnsureKeys: () => void
   onClearRoutePause: (routeID?: number) => void
   onShowPauseError: (route: Partial<GatewayRoute>) => void
+  /** 各路由仍生效的冷却（key 为路由 id） */
+  routeCooldowns?: Record<number, GatewayRouteCooldownState>
+  /** 先测试上游，成功后解除冷却并恢复调度 */
+  onReleaseCooldown?: (routeID?: number) => void
+  releasingRouteID?: number | null
   highlightedRouteID?: number | null
   /** 各路由 24h 用量（按尝试计，key 为路由 id） */
   stats?: Record<string, GatewayUsageStat>
@@ -230,6 +238,9 @@ export function RoutesPanel({
   onEnsureKeys,
   onClearRoutePause,
   onShowPauseError,
+  routeCooldowns,
+  onReleaseCooldown,
+  releasingRouteID,
   highlightedRouteID,
   stats,
 }: RoutesPanelProps) {
@@ -337,6 +348,7 @@ export function RoutesPanel({
                     1
                   : provider?.default_billing_rate || 1
                 : routeAccountRate(r, sgs)
+            const cooldown = r.id ? routeCooldowns?.[r.id] : undefined
             const uaMode: GatewayUserAgentMode =
               r.user_agent_mode === "group" || r.user_agent_mode === "custom"
                 ? r.user_agent_mode
@@ -357,7 +369,8 @@ export function RoutesPanel({
                 <TableCell>
                   {r.id ? (
                     <div className="space-y-0.5">
-                      {isRouteTempPaused(r.temp_unschedulable_until) ? (
+                      {isRouteTempPaused(r.temp_unschedulable_until) ||
+                      hasRouteCooldown(cooldown) ? (
                         <div className="text-[11px] font-medium text-red-600 dark:text-red-400">
                           冷却中 · 本次跳过
                         </div>
@@ -734,9 +747,19 @@ export function RoutesPanel({
                       )
                     )}
                   </div>
-                  {hasRoutePauseError(r) && (
+                  {(hasRoutePauseError(r) || hasRouteCooldown(cooldown)) && (
                     <div className="mt-1 flex flex-wrap items-center gap-1">
-                      {isRouteTempPaused(r.temp_unschedulable_until) ? (
+                      {routeCooldownLabels(cooldown).map((b) => (
+                        <Badge
+                          key={b.label}
+                          variant="destructive"
+                          title={b.title}
+                          className="whitespace-pre-line"
+                        >
+                          {b.label}
+                        </Badge>
+                      ))}
+                      {!hasRoutePauseError(r) ? null : isRouteTempPaused(r.temp_unschedulable_until) ? (
                         <Badge variant="destructive" title={
                           r.temp_unschedulable_until
                             ? `冷却至 ${new Date(r.temp_unschedulable_until).toLocaleString("zh-CN")}`
@@ -750,15 +773,33 @@ export function RoutesPanel({
                       ) : (
                         <Badge variant="secondary">已恢复</Badge>
                       )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 px-1.5 text-xs"
-                        onClick={() => onShowPauseError(r)}
-                      >
-                        错误
-                      </Button>
-                      {r.id ? (
+                      {hasRoutePauseError(r) ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 px-1.5 text-xs"
+                          onClick={() => onShowPauseError(r)}
+                        >
+                          错误
+                        </Button>
+                      ) : null}
+                      {r.id && onReleaseCooldown &&
+                      (isRouteTempPaused(r.temp_unschedulable_until) || hasRouteCooldown(cooldown)) ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 px-1.5 text-xs"
+                          disabled={releasingRouteID != null}
+                          title="先用真实请求测试该路由，成功后解除暂停 / 密钥冷却 / 模型冷却并恢复调度；失败则保留冷却并显示原因"
+                          onClick={() => void onReleaseCooldown(r.id)}
+                        >
+                          {releasingRouteID === r.id ? (
+                            <Loader2 className="mr-1 size-3 animate-spin" />
+                          ) : null}
+                          解除冷却并测试
+                        </Button>
+                      ) : null}
+                      {r.id && hasRoutePauseError(r) ? (
                         <Button
                           size="sm"
                           variant="outline"

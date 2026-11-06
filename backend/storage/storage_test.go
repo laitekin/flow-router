@@ -2002,3 +2002,12 @@ func TestGatewayUsageSummary(t *testing.T) {
 		t.Fatalf("provider 7 = %+v", p)
 	}
 }
+
+func TestValidateRechargeURL(t *testing.T) {
+	for u, ok := range map[string]bool{"": true, "https://a.example/topup": true, "HTTP://a.example": true,
+		"javascript:alert(1)": false, "ftp://x": false, "https://a b": false, "/console/topup": false} {
+		if err := ValidateRechargeURL(u); (err == nil) != ok {
+			t.Errorf("%q: err=%v", u, err)
+		}
+	}
+}

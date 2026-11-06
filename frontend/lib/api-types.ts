@@ -28,6 +28,9 @@ export type MonitorJob = "login" | "balance" | "rates"
 
 export type NotificationEvent =
   | "balance_low"
+  | "balance_critical"
+  | "balance_exhausted"
+  | "balance_recovered"
   | "rate_changed"
   | "rate_structure_changed"
   | "rate_added"
@@ -40,6 +43,35 @@ export type NotificationEvent =
   | "subscription_weekly_remaining_low"
   | "subscription_monthly_remaining_low"
   | "subscription_expiring"
+
+export type BalanceAlertLevel = "ok" | "warn" | "critical" | "exhausted"
+
+/** GET /balance-alerts：余额分级提醒状态 */
+export interface BalanceAlertStatus {
+  subject_kind: "channel" | "provider"
+  subject_id: number
+  name: string
+  level: BalanceAlertLevel
+  level_since: string
+  last_sent_level?: string
+  last_sent_at?: string
+  last_balance?: number
+  /** 每小时消耗（与余额同单位） */
+  burn_per_hour?: number
+  /** 预计可用小时数；无消耗时为空 */
+  runway_hours?: number
+  reason?: string
+  exhausted_at?: string
+  recharge_at?: string
+  snooze_until?: string
+  recharge_url?: string
+  /** 近 24h 有网关流量 */
+  in_use: boolean
+  budget_amount?: number
+  budget_set_at?: string
+  budget_remaining?: number
+  budget_threshold?: number
+}
 
 export interface Channel {
   id: number
@@ -57,6 +89,8 @@ export interface Channel {
   proxy_enabled: boolean
   captcha_config_id?: number | null
   balance_threshold: number
+  /** 余额提醒里的充值链接；空则 NewAPI 默认 /console/topup */
+  recharge_url?: string
   recharge_multiplier?: number | null
   recharge_multiplier_mode: RechargeMultiplierMode
   monitor_enabled: boolean
@@ -264,6 +298,14 @@ export interface SystemNotificationsConfig {
   subscriptionExpiryThresholdHours: number
   subscriptionAlertCooldownMinutes: number
   sendMaxAttempts: number
+  balanceRunwayWarnHours: number
+  balanceRunwayCriticalHours: number
+  balanceAlertWarnRepeatMinutes: number
+  balanceAlertCriticalRepeatMinutes: number
+  balanceAlertExhaustedRepeatMinutes: number
+  balanceRunwayAllChannels: boolean
+  balanceAutoReleaseOnRecharge: boolean
+  balanceUrgentScanMinutes: number
 }
 
 export interface SystemProxyConfig {
@@ -628,6 +670,11 @@ export interface GatewayProvider {
   proxy_enabled?: boolean
   extra_headers?: string
   notes?: string
+  /** 直连渠道预算（与网关账户侧费用同单位）；剩余 = 预算 − 登记后网关记录的费用 */
+  budget_amount?: number | null
+  budget_set_at?: string | null
+  budget_threshold?: number
+  recharge_url?: string
   created_at: string
   updated_at: string
 }
@@ -736,6 +783,40 @@ export interface GatewayModelTestResult {
   error?: string
 }
 
+/** 路由当前仍生效的冷却（GET /gateway/groups/:id/route-cooldowns） */
+export interface GatewayRouteCooldownState {
+  route_id: number
+  /** 普通失败触发的路由暂停 */
+  pause_until?: string
+  /** 余额不足触发的密钥冷却；端点+凭据相同的路由共享 */
+  credential?: {
+    until: string
+    failures: number
+    reason: string
+    request_id?: string
+    last_failure_at: string
+    trigger_route_id?: number
+  }
+  /** 该路由上单个模型的冷却 */
+  models?: {
+    model: string
+    until: string
+    failures: number
+    reason?: string
+    request_id?: string
+  }[]
+}
+
+/** POST /gateway/routes/:id/release-cooldown：先测试，成功后才解除 */
+export interface GatewayReleaseCooldownResult {
+  released: boolean
+  tests: GatewayModelTestResult[]
+  cleared_pause: boolean
+  cleared_credential: boolean
+  cleared_models?: string[]
+  remaining?: GatewayRouteCooldownState
+}
+
 export interface GatewayModelSyncRouteResult {
   route_id: number
   source_kind: string
@@ -803,7 +884,10 @@ export interface GatewayProbeRound {
 export interface GatewayProbeRequest {
   model: string
   route_id: number
-  protocol: "auto" | "chat" | "responses"
+  /** image = /v1/images/generations；auto 下生图模型自动走 image */
+  protocol: "auto" | "chat" | "responses" | "image"
+  /** 生图尺寸，如 1024x1024；仅 image 使用 */
+  image_size?: string
   rounds: GatewayProbeRound[]
   interval_sec: number
   max_tokens: number
@@ -832,6 +916,9 @@ export interface GatewayProbeSample {
   reasoning_chars: number
   finish_reason?: string
   error?: string
+  /** 生图返回的图片（URL 或 data URI）；超出回传上限的项为空串 */
+  images?: string[]
+  images_truncated?: boolean
 }
 
 export interface GatewayProbeEvent {

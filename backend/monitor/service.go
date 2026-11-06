@@ -24,6 +24,7 @@ type Service struct {
 	channelSvc    *channel.Service
 	dispatcher    *notify.Dispatcher
 	log           *slog.Logger
+	balanceEval   BalanceEvaluator
 }
 
 func NewService(
@@ -43,6 +44,27 @@ func NewService(
 		channelSvc:    channelSvc,
 		dispatcher:    dispatcher,
 		log:           log,
+	}
+}
+
+// BalanceEvaluator 余额分级提醒（balancealert.Service）；刷新余额后回调。
+type BalanceEvaluator interface {
+	EvaluateChannel(ctx context.Context, c *storage.Channel)
+}
+
+// SetBalanceEvaluator 接入分级提醒；接入后旧的固定阈值提醒由其接管。
+func (s *Service) SetBalanceEvaluator(e BalanceEvaluator) { s.balanceEval = e }
+
+// RefreshBalances 刷新指定渠道余额（紧急渠道加密采样用）。单个失败不影响其他。
+func (s *Service) RefreshBalances(ctx context.Context, ids []uint) {
+	for _, id := range ids {
+		c, err := s.channels.FindByID(id)
+		if err != nil || !c.MonitorEnabled {
+			continue
+		}
+		if err := s.RefreshBalance(ctx, c); err != nil {
+			s.log.Warn("urgent balance refresh failed", "channel", c.Name, "err", err)
+		}
 	}
 }
 
@@ -124,6 +146,11 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 	})
 	progress.OK(ctx, progress.StageBalance, fmt.Sprintf("当前余额 %.4f", res.Balance),
 		map[string]any{"balance": res.Balance})
+	if s.balanceEval != nil {
+		bal := res.Balance
+		c.LastBalance, c.LastBalanceAt = &bal, &sampledAt
+		s.balanceEval.EvaluateChannel(ctx, c)
+	}
 
 	progress.Start(ctx, progress.StageCost, "拉取消费…")
 	costRes, err := conn.GetCosts(ctx, resolved, session)
@@ -144,7 +171,8 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 	progress.OK(ctx, progress.StageCost, fmt.Sprintf("今日 %0.4f / 累计 %0.4f", costRes.TodayCost, costRes.TotalCost),
 		map[string]any{"today_cost": costRes.TodayCost, "total_cost": costRes.TotalCost})
 
-	if c.BalanceThreshold > 0 && res.Balance < c.BalanceThreshold {
+	// 未接入分级提醒时保留旧的固定阈值提醒
+	if s.balanceEval == nil && c.BalanceThreshold > 0 && res.Balance < c.BalanceThreshold {
 		body := fmt.Sprintf("当前余额: %.4f，阈值: %.4f", res.Balance, c.BalanceThreshold)
 		_ = s.dispatcher.Dispatch(ctx, notify.Message{
 			Event:     storage.EventBalanceLow,

@@ -64,6 +64,7 @@ type channelInput struct {
 	ProxyEnabled           bool                   `json:"proxy_enabled"`
 	CaptchaConfigID        *uint                  `json:"captcha_config_id"`
 	BalanceThreshold       float64                `json:"balance_threshold"`
+	RechargeURL            string                 `json:"recharge_url"`
 	RechargeMultiplier     *float64               `json:"recharge_multiplier"`
 	RechargeMultiplierMode string                 `json:"recharge_multiplier_mode"`
 	MonitorEnabled         bool                   `json:"monitor_enabled"`
@@ -85,6 +86,7 @@ type channelUpdateInput struct {
 	ProxyEnabled           *bool                   `json:"proxy_enabled"`
 	CaptchaConfigID        *uint                   `json:"captcha_config_id"`
 	BalanceThreshold       *float64                `json:"balance_threshold"`
+	RechargeURL            *string                 `json:"recharge_url"`
 	RechargeMultiplier     *float64                `json:"recharge_multiplier"`
 	RechargeMultiplierMode *string                 `json:"recharge_multiplier_mode"`
 	MonitorEnabled         *bool                   `json:"monitor_enabled"`
@@ -171,6 +173,7 @@ func createChannel(c *gin.Context, d *Deps) {
 		ProxyEnabled:           in.ProxyEnabled,
 		CaptchaConfigID:        in.CaptchaConfigID,
 		BalanceThreshold:       in.BalanceThreshold,
+		RechargeURL:            in.RechargeURL,
 		RechargeMultiplier:     in.RechargeMultiplier,
 		RechargeMultiplierMode: in.RechargeMultiplierMode,
 		MonitorEnabled:         in.MonitorEnabled,
@@ -271,6 +274,7 @@ func updateChannel(c *gin.Context, d *Deps) {
 		ProxyEnabled:           in.ProxyEnabled,
 		CaptchaConfigID:        in.CaptchaConfigID,
 		BalanceThreshold:       in.BalanceThreshold,
+		RechargeURL:            in.RechargeURL,
 		RechargeMultiplier:     in.RechargeMultiplier,
 		RechargeMultiplierMode: in.RechargeMultiplierMode,
 		MonitorEnabled:         in.MonitorEnabled,

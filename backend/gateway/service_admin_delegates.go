@@ -166,10 +166,20 @@ func (s *Service) TestGroupModel(ctx context.Context, groupID uint, in TestModel
 	return s.admin().TestGroupModel(ctx, groupID, in)
 }
 
-func (s *Service) probeRouteModel(parent context.Context, group *storage.GatewayGroup, route storage.GatewayRoute, requestedModel string, groupMapping map[string]string) ModelTestResult {
-	return s.admin().probeRouteModel(parent, group, route, requestedModel, groupMapping)
+func (s *Service) probeRouteModel(parent context.Context, group *storage.GatewayGroup, route storage.GatewayRoute, requestedModel string, groupMapping map[string]string, mode string) ModelTestResult {
+	return s.admin().probeRouteModel(parent, group, route, requestedModel, groupMapping, mode)
 }
 
 func (s *Service) invalidateModelsCache(groupID uint) {
 	s.admin().invalidateModelsCache(groupID)
+}
+
+// RouteCooldowns 列出组内各路由仍生效的暂停 / 密钥冷却 / 模型冷却。
+func (s *Service) RouteCooldowns(groupID uint) ([]RouteCooldownState, error) {
+	return s.admin().RouteCooldowns(groupID)
+}
+
+// ReleaseRouteCooldown 测试路由，成功后解除冷却并恢复调度。
+func (s *Service) ReleaseRouteCooldown(ctx context.Context, routeID uint, in ReleaseCooldownInput) (*ReleaseCooldownResult, error) {
+	return s.admin().ReleaseRouteCooldown(ctx, routeID, in)
 }

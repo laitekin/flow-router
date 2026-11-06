@@ -28,8 +28,11 @@ import { useConfirm } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api"
 import { useChannels } from "@/lib/queries"
 import { cn } from "@/lib/utils"
+import { formatDurationMS } from "@/lib/format"
 import type {
   GatewayCatalogModel,
+  GatewayReleaseCooldownResult,
+  GatewayRouteCooldownState,
   GatewayCatalogSyncResult,
   GatewayEnsureKeysResult,
   GatewayGroup,
@@ -104,6 +107,7 @@ import {
   type KeyFormState,
   type MainTab,
   type PriceFormState,
+  describeProbeFailure,
 } from "./gateway-utils"
 
 export function GatewayPage() {
@@ -211,6 +215,8 @@ export function GatewayPage() {
   const [modelTestTarget, setModelTestTarget] = useState<GatewayModelListItem | null>(null)
   /** 路由临时暂停错误详情弹窗 */
   const [pauseErrorRoute, setPauseErrorRoute] = useState<Partial<GatewayRoute> | null>(null)
+  const [routeCooldowns, setRouteCooldowns] = useState<Record<number, GatewayRouteCooldownState>>({})
+  const [releasingRouteID, setReleasingRouteID] = useState<number | null>(null)
   const modelTests = useModelTests(selectedGroupID ?? undefined)
 
   const selectedGroup = useMemo(
@@ -334,12 +340,19 @@ export function GatewayPage() {
   const loadRoutes = useCallback(
     async (groupID: number, seq?: number) => {
       try {
-        const res = await apiFetch<{ items: GatewayRoute[] }>(
-          `/gateway/groups/${groupID}/routes`,
-        )
+        const [res, cooldowns] = await Promise.all([
+          apiFetch<{ items: GatewayRoute[] }>(`/gateway/groups/${groupID}/routes`),
+          // 冷却状态仅用于展示，读取失败不影响路由加载
+          apiFetch<{ items: GatewayRouteCooldownState[] }>(
+            `/gateway/groups/${groupID}/route-cooldowns`,
+          ).catch(() => ({ items: [] as GatewayRouteCooldownState[] })),
+        ])
         if (seq != null && seq !== loadSeqRef.current) return
         const items = res.items ?? []
         setRouteDrafts(items.map((r) => ({ ...r })))
+        setRouteCooldowns(
+          Object.fromEntries((cooldowns.items ?? []).map((c) => [c.route_id, c])),
+        )
         for (const r of items) {
           if (r.source_channel_id) void loadSourceGroups(r.source_channel_id)
         }
@@ -1271,6 +1284,46 @@ export function GatewayPage() {
     }
   }
 
+  /** 先探测上游，成功才解除路由暂停 / 密钥冷却 / 模型冷却；失败保留冷却并提示具体原因 */
+  async function releaseRouteCooldown(routeID?: number) {
+    if (!routeID || !selectedGroup || releasingRouteID) return
+    setReleasingRouteID(routeID)
+    try {
+      const res = await apiFetch<GatewayReleaseCooldownResult>(
+        `/gateway/routes/${routeID}/release-cooldown`,
+        { method: "POST" },
+      )
+      const tests = res.tests ?? []
+      const failed = tests.filter((t) => !t.ok)
+      if (res.released) {
+        const cleared = [
+          res.cleared_credential ? "密钥冷却" : "",
+          res.cleared_pause ? "路由暂停" : "",
+          res.cleared_models?.length ? `模型冷却（${res.cleared_models.join("、")}）` : "",
+        ].filter(Boolean)
+        const okTest = tests.find((t) => t.ok)
+        const desc = [
+          cleared.length ? `已解除：${cleared.join("、")}` : "测试通过",
+          okTest ? `${okTest.requested_model} 首字 ${formatDurationMS(okTest.latency_ms)}` : "",
+          ...failed.map((t) => `${t.requested_model} 仍失败：${describeProbeFailure(t)}`),
+        ].filter(Boolean)
+        toast.success("测试成功，已恢复调度", { description: desc.join("\n") })
+      } else {
+        toast.error("测试未通过，冷却保留", {
+          description: failed
+            .map((t) => `${t.requested_model}：${describeProbeFailure(t)}`)
+            .join("\n"),
+          duration: 10000,
+        })
+      }
+      await loadRoutes(selectedGroup.id)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "解除冷却失败")
+    } finally {
+      setReleasingRouteID(null)
+    }
+  }
+
   async function loadDefaultPrices(query = defaultsQuery) {
     setDefaultsLoading(true)
     try {
@@ -1737,6 +1790,9 @@ export function GatewayPage() {
                         onEnsureKeys={() => void ensureKeys()}
                         onClearRoutePause={(id) => void clearRoutePause(id)}
                         onShowPauseError={setPauseErrorRoute}
+                        routeCooldowns={routeCooldowns}
+                        onReleaseCooldown={(id) => void releaseRouteCooldown(id)}
+                        releasingRouteID={releasingRouteID}
                         highlightedRouteID={highlightedRouteID}
                         stats={usageSummary?.routes}
                       />

@@ -104,6 +104,10 @@ export default function SettingsPage() {
   const refresh = useTriggerRefresh();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [form, setForm] = useState<SystemConfig | null>(null);
+  const setNotif = (patch: Partial<SystemConfig["notifications"]>) =>
+    setForm((prev) =>
+      prev ? { ...prev, notifications: { ...prev.notifications, ...patch } } : prev,
+    );
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [configSavedPendingApply, setConfigSavedPendingApply] = useState(false);
@@ -752,28 +756,6 @@ export default function SettingsPage() {
                 />
               </Field>
               <Field
-                label="余额不足冷却分钟"
-                description="同一渠道重复告警的抑制时间。"
-              >
-                <Input
-                  type="number"
-                  value={String(form.notifications.balanceLowCooldownMinutes)}
-                  onChange={(e) =>
-                    setForm((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            notifications: {
-                              ...prev.notifications,
-                              balanceLowCooldownMinutes: num(e.target.value),
-                            },
-                          }
-                        : prev,
-                    )
-                  }
-                />
-              </Field>
-              <Field
                 label="每日剩余提醒百分比"
                 description="Sub2API 订阅每日剩余额度低于该百分比时提醒，0 为关闭。"
               >
@@ -908,6 +890,58 @@ export default function SettingsPage() {
                   }
                 />
               </Field>
+            </div>
+            <div className="mt-6 space-y-3 border-t border-border pt-5">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">余额分级提醒</h3>
+                <p className="text-[11px] leading-5 text-muted-foreground">
+                  按「余额 ÷ 消耗速度」估算预计可用时长：等级升高立即提醒，同级按间隔重复，降级不打扰，回到正常发恢复通知。
+                  网关真实请求返回余额 / 额度不足时实时发「已耗尽」。渠道上手填的余额阈值始终生效。
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <Field label="预警：预计可用低于（小时）" description="默认 24，0 为关闭该级。">
+                  <Input type="number" step="0.5" min={0} value={String(form.notifications.balanceRunwayWarnHours)}
+                    onChange={(e) => setNotif({ balanceRunwayWarnHours: Number(e.target.value || 0) })} />
+                </Field>
+                <Field label="紧急：预计可用低于（小时）" description="默认 3，0 为关闭该级。">
+                  <Input type="number" step="0.5" min={0} value={String(form.notifications.balanceRunwayCriticalHours)}
+                    onChange={(e) => setNotif({ balanceRunwayCriticalHours: Number(e.target.value || 0) })} />
+                </Field>
+                <Field label="紧急渠道加密采样（分钟）" description="紧急 / 已耗尽渠道改为按此间隔刷新余额，0 关闭。">
+                  <Input type="number" min={0} value={String(form.notifications.balanceUrgentScanMinutes)}
+                    onChange={(e) => setNotif({ balanceUrgentScanMinutes: num(e.target.value) })} />
+                </Field>
+                <div />
+                <Field label="预警重复间隔（分钟）" description="同为预警时多久再提醒一次，0 不重复。">
+                  <Input type="number" min={0} value={String(form.notifications.balanceAlertWarnRepeatMinutes)}
+                    onChange={(e) => setNotif({ balanceAlertWarnRepeatMinutes: num(e.target.value) })} />
+                </Field>
+                <Field label="紧急重复间隔（分钟）" description="默认 120。">
+                  <Input type="number" min={0} value={String(form.notifications.balanceAlertCriticalRepeatMinutes)}
+                    onChange={(e) => setNotif({ balanceAlertCriticalRepeatMinutes: num(e.target.value) })} />
+                </Field>
+                <Field label="已耗尽重复间隔（分钟）" description="默认 30。">
+                  <Input type="number" min={0} value={String(form.notifications.balanceAlertExhaustedRepeatMinutes)}
+                    onChange={(e) => setNotif({ balanceAlertExhaustedRepeatMinutes: num(e.target.value) })} />
+                </Field>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <InlineSwitch
+                  id="balance-all-channels"
+                  label="所有渠道都估算可用时长"
+                  description="关闭时只对「被启用路由引用且近 24 小时有网关流量」的渠道自动估算，减少无关提醒。"
+                  checked={form.notifications.balanceRunwayAllChannels}
+                  onCheckedChange={(v) => setNotif({ balanceRunwayAllChannels: v })}
+                />
+                <InlineSwitch
+                  id="balance-auto-release"
+                  label="充值后自动恢复调度"
+                  description="识别到余额回升（或登记直连渠道充值）后，自动对冷却中的路由执行「解除冷却并测试」，并推送结果。"
+                  checked={form.notifications.balanceAutoReleaseOnRecharge}
+                  onCheckedChange={(v) => setNotif({ balanceAutoReleaseOnRecharge: v })}
+                />
+              </div>
             </div>
           </SectionCard>
 

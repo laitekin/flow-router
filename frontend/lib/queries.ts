@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api"
 import { useRefreshTick } from "@/lib/refresh-context"
 import type {
   AppVersion,
+  BalanceAlertStatus,
   BalanceTrendPoint,
   CaptchaConfig,
   Channel,
@@ -192,6 +193,11 @@ export function useBalanceTrend(days = 7) {
 
 export function useCostTrend(days = 7) {
   return useApi<CostTrendPoint[]>(`/dashboard/cost-trend?days=${days}`)
+}
+
+/** 余额分级提醒状态（监控渠道 + 直连渠道） */
+export function useBalanceAlerts() {
+  return useApi<{ items: BalanceAlertStatus[] }>("/balance-alerts")
 }
 
 export function useChannels() {

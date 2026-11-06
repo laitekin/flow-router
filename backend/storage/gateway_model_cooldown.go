@@ -88,3 +88,13 @@ func (r *GatewayRoutes) NoteModelSuccess(routeID uint, model string, started tim
 	defer r.modelCooldownMu.Unlock()
 	return r.db.Where("route_id = ? AND model = ? AND last_failure_at <= ?", routeID, strings.TrimSpace(model), started).Delete(&GatewayModelCooldown{}).Error
 }
+
+// ActiveModelCooldownsForRoutes 返回指定路由上仍生效的模型冷却，按路由、模型排序。
+func (r *GatewayRoutes) ActiveModelCooldownsForRoutes(routeIDs []uint, now time.Time) ([]GatewayModelCooldown, error) {
+	if len(routeIDs) == 0 {
+		return nil, nil
+	}
+	var rows []GatewayModelCooldown
+	err := r.db.Where("route_id IN ? AND cooldown_until > ?", routeIDs, now).Order("route_id ASC, model ASC").Find(&rows).Error
+	return rows, err
+}

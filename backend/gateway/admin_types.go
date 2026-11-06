@@ -100,6 +100,8 @@ type CreateProviderInput struct {
 	ProxyEnabled       *bool   `json:"proxy_enabled"`
 	ExtraHeadersJSON   string  `json:"extra_headers"`
 	Notes              string  `json:"notes"`
+	RechargeURL        string  `json:"recharge_url"`
+	BudgetThreshold    float64 `json:"budget_threshold"`
 }
 
 // UpdateProviderInput 更新直连渠道（指针字段：nil 表示不改；APIKey 空或省略=不改）。
@@ -114,6 +116,8 @@ type UpdateProviderInput struct {
 	ProxyEnabled       *bool    `json:"proxy_enabled"`
 	ExtraHeadersJSON   *string  `json:"extra_headers"`
 	Notes              *string  `json:"notes"`
+	RechargeURL        *string  `json:"recharge_url"`
+	BudgetThreshold    *float64 `json:"budget_threshold"`
 }
 
 // RouteInput 保存路由时的单条输入。
@@ -250,6 +254,8 @@ type SyncGroupModelsInput struct {
 type TestModelInput struct {
 	Model   string `json:"model"`
 	RouteID *uint  `json:"route_id"` // 指定则只测该路由；省略则测所有可调度路由
+	// Mode auto（默认，按模型名识别生图模型）| chat | image
+	Mode string `json:"mode"`
 }
 
 // ModelTestResult 单条路由探测结果。

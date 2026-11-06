@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Loader2, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react"
+import { Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Wallet } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -42,6 +42,8 @@ import type {
 import { cn } from "@/lib/utils"
 import { formatDurationMS, relativeTime } from "@/lib/format"
 import { StatLine, SUMMARY_WINDOW_LABEL } from "./usage-stat"
+import { useBalanceAlerts } from "@/lib/queries"
+import { BalanceAlertActions, RunwayValue, balanceAlertKey, indexBalanceAlerts } from "@/components/monitor/balance-runway"
 
 type ProviderForm = {
   name: string
@@ -53,7 +55,11 @@ type ProviderForm = {
   enabled: boolean
   proxy_enabled: boolean
   notes: string
+  recharge_url: string
+  budget_threshold: string
 }
+
+type BudgetMode = "add" | "set" | "clear"
 
 const emptyForm = (): ProviderForm => ({
   name: "",
@@ -65,6 +71,8 @@ const emptyForm = (): ProviderForm => ({
   enabled: true,
   proxy_enabled: false,
   notes: "",
+  recharge_url: "",
+  budget_threshold: "0",
 })
 
 export function GatewayProvidersPanel({
@@ -82,6 +90,11 @@ export function GatewayProvidersPanel({
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<GatewayProvider | null>(null)
   const [form, setForm] = useState<ProviderForm>(emptyForm())
+  const balanceAlerts = useBalanceAlerts()
+  const alertsByKey = indexBalanceAlerts(balanceAlerts.data?.items)
+  const [budgetFor, setBudgetFor] = useState<GatewayProvider | null>(null)
+  const [budgetMode, setBudgetMode] = useState<BudgetMode>("add")
+  const [budgetAmount, setBudgetAmount] = useState("")
 
   const load = useCallback(
     async (p = pageNum, query = q) => {
@@ -126,6 +139,8 @@ export function GatewayProvidersPanel({
       enabled: item.enabled !== false,
       proxy_enabled: !!item.proxy_enabled,
       notes: item.notes || "",
+      recharge_url: item.recharge_url || "",
+      budget_threshold: String(item.budget_threshold ?? 0),
     })
     setDialogOpen(true)
   }
@@ -150,6 +165,16 @@ export function GatewayProvidersPanel({
       toast.error("计费倍率须为正数")
       return
     }
+    const budgetThreshold = Number(form.budget_threshold || 0)
+    if (!Number.isFinite(budgetThreshold) || budgetThreshold < 0) {
+      toast.error("预算阈值须为非负数")
+      return
+    }
+    const rechargeURL = form.recharge_url.trim()
+    if (rechargeURL && !/^https?:\/\//i.test(rechargeURL)) {
+      toast.error("充值链接须以 http:// 或 https:// 开头")
+      return
+    }
     setBusy(true)
     try {
       if (editing) {
@@ -162,6 +187,8 @@ export function GatewayProvidersPanel({
           enabled: form.enabled,
           proxy_enabled: form.proxy_enabled,
           notes: form.notes.trim(),
+          recharge_url: rechargeURL,
+          budget_threshold: budgetThreshold,
         }
         if (form.api_key.trim()) body.api_key = form.api_key.trim()
         await apiFetch(`/gateway/providers/${editing.id}`, {
@@ -182,6 +209,8 @@ export function GatewayProvidersPanel({
             enabled: form.enabled,
             proxy_enabled: form.proxy_enabled,
             notes: form.notes.trim(),
+            recharge_url: rechargeURL,
+            budget_threshold: budgetThreshold,
           }),
         })
         toast.success("已创建直连渠道")
@@ -190,6 +219,42 @@ export function GatewayProvidersPanel({
       await load(editing ? pageNum : 1, q)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "保存失败")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function openBudget(item: GatewayProvider) {
+    setBudgetFor(item)
+    setBudgetMode(item.budget_amount != null ? "add" : "set")
+    setBudgetAmount("")
+  }
+
+  async function saveBudget() {
+    if (!budgetFor) return
+    const amount = Number(budgetAmount || 0)
+    if (budgetMode !== "clear" && (!Number.isFinite(amount) || amount < 0 || (budgetMode === "add" && amount <= 0))) {
+      toast.error(budgetMode === "add" ? "充值金额须为正数" : "预算须为非负数")
+      return
+    }
+    setBusy(true)
+    try {
+      await apiFetch(`/gateway/providers/${budgetFor.id}/budget`, {
+        method: "POST",
+        body: JSON.stringify({ mode: budgetMode, amount }),
+      })
+      toast.success(
+        budgetMode === "clear"
+          ? "已取消预算跟踪"
+          : budgetMode === "add"
+            ? "已记一笔充值，冷却中的路由会自动测试恢复"
+            : "已设置预算",
+      )
+      setBudgetFor(null)
+      balanceAlerts.refetch()
+      await load(pageNum, q)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "保存预算失败")
     } finally {
       setBusy(false)
     }
@@ -278,6 +343,7 @@ export function GatewayProvidersPanel({
                   <TableHead>默认倍率</TableHead>
                   <TableHead>Key</TableHead>
                   <TableHead title="按尝试计：每次重试 / 顺延都算一次">{SUMMARY_WINDOW_LABEL} 尝试</TableHead>
+                  <TableHead title="直连渠道查不到余额：登记预算后按网关记录的费用扣减估算">预算 / 预计可用</TableHead>
                   <TableHead>代理</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead className="text-right">操作</TableHead>
@@ -286,13 +352,13 @@ export function GatewayProvidersPanel({
               <TableBody>
                 {loading && items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">
                       <Loader2 className="mx-auto size-4 animate-spin" />
                     </TableCell>
                   </TableRow>
                 ) : items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">
                       暂无直连渠道，点击右上角「新建」添加
                     </TableCell>
                   </TableRow>
@@ -331,6 +397,30 @@ export function GatewayProvidersPanel({
                             </div>
                           ) : null}
                         </div>
+                      </TableCell>
+                      <TableCell className="min-w-[11rem]">
+                        {(() => {
+                          const st = alertsByKey[balanceAlertKey("provider", p.id)]
+                          return (
+                            <div className="space-y-1 text-xs">
+                              {p.budget_amount != null ? (
+                                <div className="tabular-nums">
+                                  剩余 {st?.budget_remaining != null ? `$${st.budget_remaining.toFixed(2)}` : "—"}
+                                  <span className="text-muted-foreground"> / ${p.budget_amount.toFixed(2)}</span>
+                                </div>
+                              ) : (
+                                <div className="text-muted-foreground">未登记预算</div>
+                              )}
+                              {p.budget_amount != null || st ? <RunwayValue status={st} /> : null}
+                              <div className="flex items-center gap-1">
+                                <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[11px]" onClick={() => openBudget(p)}>
+                                  <Wallet className="size-3" /> {p.budget_amount != null ? "登记充值" : "设置预算"}
+                                </Button>
+                                <BalanceAlertActions kind="provider" id={p.id} status={st} rechargeURL={p.recharge_url} onChanged={balanceAlerts.refetch} />
+                              </div>
+                            </div>
+                          )
+                        })()}
                       </TableCell>
                       <TableCell>
                         {p.proxy_enabled ? (
@@ -538,6 +628,27 @@ export function GatewayProvidersPanel({
             <p className="text-[11px] leading-5 text-muted-foreground">
               User-Agent 在网关组与路由上配置（透传 / 组 / 自定义），不再按直连渠道单独设置。
             </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label>充值链接</Label>
+                <Input
+                  type="url"
+                  value={form.recharge_url}
+                  onChange={(e) => setForm({ ...form, recharge_url: e.target.value })}
+                  placeholder="https://…（余额提醒中附带）"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>预算阈值（$，0 = 只按可用时长）</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.budget_threshold}
+                  onChange={(e) => setForm({ ...form, budget_threshold: e.target.value })}
+                />
+              </div>
+            </div>
             <div className="space-y-1">
               <Label>备注</Label>
               <Textarea
@@ -553,6 +664,59 @@ export function GatewayProvidersPanel({
               取消
             </Button>
             <Button disabled={busy} onClick={() => void save()}>
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={budgetFor != null} onOpenChange={(open) => !open && setBudgetFor(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>预算 · {budgetFor?.name}</DialogTitle>
+            <DialogDescription>
+              直连渠道查不到上游余额。登记后按网关记录的「账户侧费用」扣减估算剩余与预计可用时长，用于分级提醒。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>操作</Label>
+              <Select value={budgetMode} onValueChange={(v) => setBudgetMode(v as BudgetMode)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {budgetFor?.budget_amount != null ? <SelectItem value="add">记一笔充值（在当前剩余上追加）</SelectItem> : null}
+                  <SelectItem value="set">设为当前剩余（从现在起重新扣减）</SelectItem>
+                  {budgetFor?.budget_amount != null ? <SelectItem value="clear">取消预算跟踪</SelectItem> : null}
+                </SelectContent>
+              </Select>
+            </div>
+            {budgetMode !== "clear" ? (
+              <div className="space-y-1">
+                <Label>{budgetMode === "add" ? "充值金额（$）" : "当前剩余（$）"}</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={budgetAmount}
+                  onChange={(e) => setBudgetAmount(e.target.value)}
+                  autoFocus
+                />
+                {budgetMode === "add" ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    记充值后会自动对冷却中的路由执行「解除冷却并测试」（可在设置中关闭）。
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBudgetFor(null)}>
+              取消
+            </Button>
+            <Button disabled={busy} onClick={() => void saveBudget()}>
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
               保存
             </Button>

@@ -109,6 +109,18 @@ func (s Subscription) matchesEvent(event storage.NotificationEvent) bool {
 		if e == event {
 			return true
 		}
+		// 历史订阅只勾了「余额不足」：视为订阅整个余额提醒族（预警/紧急/耗尽/恢复）
+		if e == storage.EventBalanceLow && isBalanceEvent(event) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBalanceEvent(event storage.NotificationEvent) bool {
+	switch event {
+	case storage.EventBalanceLow, storage.EventBalanceCritical, storage.EventBalanceExhausted, storage.EventBalanceRecovered:
+		return true
 	}
 	return false
 }
