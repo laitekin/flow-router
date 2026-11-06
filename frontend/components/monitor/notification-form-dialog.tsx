@@ -108,7 +108,11 @@ function emptyConfig(): ConfigState {
 }
 
 const notificationEventOptions: Array<{ id: string; label: string; events: NotificationEvent[] }> = [
-  { id: "balance_low", label: "余额不足", events: ["balance_low"] },
+  {
+    id: "balance_low",
+    label: "余额提醒",
+    events: ["balance_low", "balance_critical", "balance_exhausted", "balance_recovered"],
+  },
   { id: "rate_changed", label: "倍率变化", events: ["rate_changed"] },
   {
     id: "rate_group_changed",

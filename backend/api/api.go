@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"github.com/bejix/upstream-ops/backend/balancealert"
 	"github.com/bejix/upstream-ops/backend/kv"
 	"io/fs"
 	"log/slog"
@@ -71,6 +72,7 @@ type Deps struct {
 	GatewayKeys   *storage.GatewayKeys
 	GatewayUsage  *storage.GatewayUsageLogs
 	ModelPrices   *storage.ModelPriceOverrides
+	BalanceAlerts *balancealert.Service
 	Log           *slog.Logger
 	// KV 缓存后端（Redis 或内存）；nil 时聚合接口不缓存
 	KV kv.Store
@@ -133,6 +135,7 @@ func Register(r *gin.Engine, d *Deps) {
 		registerDashboard(api, d)
 		registerSettings(api, d)
 		registerGatewayAdmin(api, d)
+		registerBalanceAlerts(api, d)
 	}
 
 	if d.Frontend != nil {

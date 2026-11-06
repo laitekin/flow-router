@@ -200,6 +200,7 @@ func AllModels() []any {
 		&GatewayCredentialCooldown{},
 		&GatewayProvider{},
 		&GatewayUsageLog{},
+		&BalanceAlertState{},
 		&ModelPriceOverride{},
 	}
 }

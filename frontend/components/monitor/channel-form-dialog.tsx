@@ -68,6 +68,7 @@ interface FormState {
   sub2api_refresh_token: string
 
   balance_threshold: string
+  recharge_url: string
   recharge_multiplier: string
   recharge_multiplier_mode: RechargeMultiplierMode
   monitor_enabled: boolean
@@ -97,6 +98,7 @@ function initialState(c?: Channel | null): FormState {
     sub2api_access_token: "",
     sub2api_refresh_token: "",
     balance_threshold: c?.balance_threshold != null ? String(c.balance_threshold) : "0",
+    recharge_url: c?.recharge_url ?? "",
     recharge_multiplier: c?.recharge_multiplier != null ? String(c.recharge_multiplier) : "",
     recharge_multiplier_mode: rechargeMultiplierMode,
     monitor_enabled: c?.monitor_enabled ?? true,
@@ -257,6 +259,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
           credential_mode: form.credential_mode,
           login_extra_params: loginExtraParams,
           balance_threshold: threshold,
+          recharge_url: form.recharge_url.trim(),
           recharge_multiplier: rechargeMultiplier,
           recharge_multiplier_mode: form.recharge_multiplier_mode,
           monitor_enabled: form.monitor_enabled,
@@ -287,6 +290,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
             password: isTokenMode ? "" : form.password,
             token_credential: isTokenMode ? tokenCredential : "",
             balance_threshold: threshold,
+            recharge_url: form.recharge_url.trim(),
             recharge_multiplier: rechargeMultiplier,
             recharge_multiplier_mode: form.recharge_multiplier_mode,
             monitor_enabled: form.monitor_enabled,
@@ -635,6 +639,21 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
               min="0"
               value={form.balance_threshold}
               onChange={(e) => setForm({ ...form, balance_threshold: e.target.value })}
+              disabled={submitting}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              在用渠道还会按消耗速度自动估算「预计可用时长」分级提醒，阈值可留 0。
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="recharge-url">充值链接（余额提醒中附带）</Label>
+            <Input
+              id="recharge-url"
+              type="url"
+              placeholder={form.type === "newapi" ? "留空 = 站点地址/console/topup" : "留空 = 站点地址"}
+              value={form.recharge_url}
+              onChange={(e) => setForm({ ...form, recharge_url: e.target.value })}
               disabled={submitting}
             />
           </div>

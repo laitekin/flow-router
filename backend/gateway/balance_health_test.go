@@ -162,3 +162,42 @@ func TestFailoverDecisionReasons(t *testing.T) {
 		})
 	}
 }
+
+type recordingReporter struct {
+	ch chan CredentialExhaustedEvent
+}
+
+func (r *recordingReporter) ReportCredentialExhausted(_ context.Context, ev CredentialExhaustedEvent) {
+	r.ch <- ev
+}
+
+func TestBalanceExhaustedIsReportedInRealTime(t *testing.T) {
+	f := newHealthFixture(t)
+	rep := &recordingReporter{ch: make(chan CredentialExhaustedEvent, 4)}
+	f.svc.BalanceAlerts = rep
+	f.mode.Store(3)
+	if w := f.call("gpt-sol", "", context.Background()); w.Code != 200 {
+		t.Fatalf("failover failed: %d", w.Code)
+	}
+	select {
+	case ev := <-rep.ch:
+		if ev.RouteID != f.routeA || ev.ProviderID == 0 || ev.GroupName != "health-test" || ev.Until.IsZero() || ev.RequestID == "" {
+			t.Fatalf("event %+v", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("exhaustion not reported")
+	}
+	// 关闭余额冷却的分组同样要上报（没有冷却截止时间）
+	f.db.Exec("DELETE FROM gateway_credential_cooldowns")
+	f.db.Model(f.group).Update("balance_cooldown_seconds", 0)
+	f.svc.InvalidateAuthCache()
+	f.call("gpt-sol", "", context.Background())
+	select {
+	case ev := <-rep.ch:
+		if ev.RouteID != f.routeA || !ev.Until.IsZero() {
+			t.Fatalf("event without cooldown %+v", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("exhaustion without cooldown not reported")
+	}
+}

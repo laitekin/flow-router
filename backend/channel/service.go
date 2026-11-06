@@ -162,6 +162,7 @@ type CreateInput struct {
 	ProxyEnabled           bool
 	CaptchaConfigID        *uint
 	BalanceThreshold       float64
+	RechargeURL            string
 	RechargeMultiplier     *float64
 	RechargeMultiplierMode string
 	MonitorEnabled         bool
@@ -169,6 +170,9 @@ type CreateInput struct {
 }
 
 func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
+	if err := storage.ValidateRechargeURL(in.RechargeURL); err != nil {
+		return nil, err
+	}
 	mode := in.CredentialMode
 	if mode == "" {
 		mode = storage.CredentialModePassword
@@ -204,6 +208,7 @@ func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 		ProxyEnabled:           in.ProxyEnabled,
 		CaptchaConfigID:        in.CaptchaConfigID,
 		BalanceThreshold:       in.BalanceThreshold,
+		RechargeURL:            strings.TrimSpace(in.RechargeURL),
 		RechargeMultiplier:     normalizeRechargeMultiplier(in.RechargeMultiplier),
 		RechargeMultiplierMode: connector.NormalizeRechargeMultiplierMode(in.RechargeMultiplierMode),
 		MonitorEnabled:         in.MonitorEnabled,
@@ -235,6 +240,7 @@ type UpdateInput struct {
 	ProxyEnabled           *bool
 	CaptchaConfigID        *uint
 	BalanceThreshold       *float64
+	RechargeURL            *string
 	RechargeMultiplier     *float64
 	RechargeMultiplierMode *string
 	MonitorEnabled         *bool
@@ -340,6 +346,12 @@ func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
 	}
 	if in.BalanceThreshold != nil {
 		c.BalanceThreshold = *in.BalanceThreshold
+	}
+	if in.RechargeURL != nil {
+		if err := storage.ValidateRechargeURL(*in.RechargeURL); err != nil {
+			return nil, err
+		}
+		c.RechargeURL = strings.TrimSpace(*in.RechargeURL)
 	}
 	if in.RechargeMultiplier != nil {
 		c.RechargeMultiplier = normalizeRechargeMultiplier(in.RechargeMultiplier)

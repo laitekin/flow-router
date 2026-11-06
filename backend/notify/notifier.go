@@ -25,6 +25,8 @@ type Message struct {
 	Subject   string
 	Body      string
 	Extra     map[string]any
+	// Managed 由调用方（余额分级提醒状态机）自行控制重复，Dispatcher 不再套用冷却。
+	Managed bool
 }
 
 // Notifier 通知渠道抽象。

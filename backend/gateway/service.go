@@ -53,6 +53,8 @@ type Service struct {
 	Log        *slog.Logger
 	// KV 缓存 / 节流后端：默认进程内内存，配置 Redis 后由 SetKV 替换为 Redis
 	KV kv.Store
+	// BalanceAlerts 真实请求撞到「余额不足」时实时上报；nil 表示不上报。
+	BalanceAlerts CredentialExhaustedReporter
 
 	// Admin 管理面；嵌入 *Service 共享依赖。
 	Admin *AdminService

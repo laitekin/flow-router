@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bejix/upstream-ops/backend/config"
 	"github.com/bejix/upstream-ops/backend/storage"
 )
 
@@ -23,6 +24,44 @@ type Policy struct {
 	SubscriptionExpiryThreshold              time.Duration
 	SubscriptionAlertCooldown                time.Duration
 	SendMaxAttempts                          int
+	Balance                                  BalanceAlertPolicy
+}
+
+// BalanceAlertPolicy 余额分级提醒策略（见 config.NotificationsConfig 同名字段）。
+type BalanceAlertPolicy struct {
+	RunwayWarnHours       float64
+	RunwayCriticalHours   float64
+	WarnRepeat            time.Duration
+	CriticalRepeat        time.Duration
+	ExhaustedRepeat       time.Duration
+	AllChannels           bool
+	AutoReleaseOnRecharge bool
+	UrgentScanInterval    time.Duration
+}
+
+// PolicyFromConfig 由配置构造通知策略（启动与热加载共用）。
+func PolicyFromConfig(prefix string, n config.NotificationsConfig) Policy {
+	return Policy{
+		NotificationPrefix:                       prefix,
+		MinChangePct:                             n.MinChangePct,
+		BalanceLowCooldown:                       time.Duration(n.BalanceLowCooldownMinutes) * time.Minute,
+		SubscriptionDailyRemainingThresholdPct:   n.SubscriptionDailyRemainingThresholdPct,
+		SubscriptionWeeklyRemainingThresholdPct:  n.SubscriptionWeeklyRemainingThresholdPct,
+		SubscriptionMonthlyRemainingThresholdPct: n.SubscriptionMonthlyRemainingThresholdPct,
+		SubscriptionExpiryThreshold:              time.Duration(n.SubscriptionExpiryThresholdHours) * time.Hour,
+		SubscriptionAlertCooldown:                time.Duration(n.SubscriptionAlertCooldownMinutes) * time.Minute,
+		SendMaxAttempts:                          n.SendMaxAttempts,
+		Balance: BalanceAlertPolicy{
+			RunwayWarnHours:       n.BalanceRunwayWarnHours,
+			RunwayCriticalHours:   n.BalanceRunwayCriticalHours,
+			WarnRepeat:            time.Duration(n.BalanceAlertWarnRepeatMinutes) * time.Minute,
+			CriticalRepeat:        time.Duration(n.BalanceAlertCriticalRepeatMinutes) * time.Minute,
+			ExhaustedRepeat:       time.Duration(n.BalanceAlertExhaustedRepeatMinutes) * time.Minute,
+			AllChannels:           n.BalanceRunwayAllChannels,
+			AutoReleaseOnRecharge: n.BalanceAutoReleaseOnRecharge,
+			UrgentScanInterval:    time.Duration(n.BalanceUrgentScanMinutes) * time.Minute,
+		},
+	}
 }
 
 // CooldownStore Dispatcher 用来判断某个 (channelID, event) 是否还在冷却窗口。

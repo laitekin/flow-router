@@ -52,7 +52,8 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useConfirm } from "@/components/ui/confirm-dialog"
-import { useChannels, useChannelsPage, useChannelRates } from "@/lib/queries"
+import { useBalanceAlerts, useChannels, useChannelsPage, useChannelRates } from "@/lib/queries"
+import { BalanceAlertActions, RunwayValue, balanceAlertKey, indexBalanceAlerts } from "./balance-runway"
 import { apiFetch } from "@/lib/api"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { channelTypeLabel, decimal, formatRatio, money, relativeTime } from "@/lib/format"
@@ -82,10 +83,11 @@ function pageNumbers(currentPage: number, totalPages: number) {
   return Array.from({ length: last - first + 1 }, (_, i) => first + i)
 }
 
-function statusOf(c: Channel): Status {
+function statusOf(c: Channel, alertLevel?: string): Status {
   if (c.last_error) return "failed"
   if (c.last_balance == null) return "idle"
   if (c.balance_threshold > 0 && c.last_balance < c.balance_threshold) return "low"
+  if (alertLevel && alertLevel !== "ok") return "low"
   return "healthy"
 }
 
@@ -579,6 +581,8 @@ export function ChannelCards() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<ChannelPageSize>(9)
   const pageQuery = useChannelsPage(page, pageSize === "all" ? -1 : pageSize)
+  const balanceAlerts = useBalanceAlerts()
+  const alertsByKey = indexBalanceAlerts(balanceAlerts.data?.items)
   const refresh = useTriggerRefresh()
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [editing, setEditing] = useState<Channel | null>(null)
@@ -856,7 +860,7 @@ export function ChannelCards() {
         <>
           <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
             {visibleChannels.map((c) => {
-              const status = statusOf(c)
+              const status = statusOf(c, alertsByKey[balanceAlertKey("channel", c.id)]?.level)
               const meta = statusMap[status]
               return (
                 <Card
@@ -927,6 +931,9 @@ export function ChannelCards() {
                     </StatTile>
                     <StatTile label="今日消费">{money(c.today_cost)}</StatTile>
                     <StatTile label="累计消费">{money(c.total_cost)}</StatTile>
+                    <StatTile label="预计可用">
+                      <RunwayValue status={alertsByKey[balanceAlertKey("channel", c.id)]} />
+                    </StatTile>
                     <StatTile label="阈值 / 状态">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <Tooltip delayDuration={150}>
@@ -947,6 +954,15 @@ export function ChannelCards() {
                         </span>
                       </div>
                     </StatTile>
+                    <div className="flex items-end justify-end">
+                      <BalanceAlertActions
+                        kind="channel"
+                        id={c.id}
+                        status={alertsByKey[balanceAlertKey("channel", c.id)]}
+                        rechargeURL={c.recharge_url || (c.type === "newapi" ? `${c.site_url.replace(/\/+$/, "")}/console/topup` : c.site_url)}
+                        onChanged={balanceAlerts.refetch}
+                      />
+                    </div>
                     <ChannelSubscriptionUsageMetricTiles channel={c} />
                     {c.last_error ? (
                       <div className="col-span-3 rounded-md border border-border bg-muted/20 px-2.5 py-2">

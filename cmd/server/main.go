@@ -14,6 +14,7 @@ import (
 
 	"github.com/bejix/upstream-ops/backend/api"
 	"github.com/bejix/upstream-ops/backend/auth"
+	"github.com/bejix/upstream-ops/backend/balancealert"
 	"github.com/bejix/upstream-ops/backend/channel"
 	"github.com/bejix/upstream-ops/backend/config"
 	"github.com/bejix/upstream-ops/backend/crypto"
@@ -133,23 +134,29 @@ func main() {
 	gatewaySvc.UpdateGatewayConfig(cfg.Gateway)
 	gatewaySvc.StartPricing(cfg.Pricing)
 	defer gatewaySvc.Stop()
-	dispatcher := notify.NewDispatcher(notifies, cipher, log, notify.Policy{
-		NotificationPrefix:                       cfg.App.NotificationPrefix,
-		MinChangePct:                             cfg.Notifications.MinChangePct,
-		BalanceLowCooldown:                       time.Duration(cfg.Notifications.BalanceLowCooldownMinutes) * time.Minute,
-		SubscriptionDailyRemainingThresholdPct:   cfg.Notifications.SubscriptionDailyRemainingThresholdPct,
-		SubscriptionWeeklyRemainingThresholdPct:  cfg.Notifications.SubscriptionWeeklyRemainingThresholdPct,
-		SubscriptionMonthlyRemainingThresholdPct: cfg.Notifications.SubscriptionMonthlyRemainingThresholdPct,
-		SubscriptionExpiryThreshold:              time.Duration(cfg.Notifications.SubscriptionExpiryThresholdHours) * time.Hour,
-		SubscriptionAlertCooldown:                time.Duration(cfg.Notifications.SubscriptionAlertCooldownMinutes) * time.Minute,
-		SendMaxAttempts:                          cfg.Notifications.SendMaxAttempts,
-	})
+	dispatcher := notify.NewDispatcher(notifies, cipher, log, notify.PolicyFromConfig(cfg.App.NotificationPrefix, cfg.Notifications))
 	dispatcher.UpdateProxyConfig(cfg.Proxy)
 	monitorSvc := monitor.NewService(channels, announcements, rates, monLogs, channelSvc, dispatcher, log)
+	// 余额分级提醒：监控刷新余额后评估、网关实时上报耗尽、调度器每分钟节拍
+	balanceAlerts := balancealert.New(balancealert.Deps{
+		States:     storage.NewBalanceAlerts(db),
+		Channels:   channels,
+		Providers:  gatewayProviders,
+		Rates:      rates,
+		Usage:      gatewayUsage,
+		Groups:     gatewayGroups,
+		Routes:     gatewayRoutes,
+		Dispatcher: dispatcher,
+		Gateway:    gatewaySvc,
+		Log:        log,
+	})
+	monitorSvc.SetBalanceEvaluator(balanceAlerts)
+	gatewaySvc.BalanceAlerts = balanceAlerts
 
 	schedulerFactory := func(scfg config.SchedulerConfig, pcfg config.ProxyConfig) *scheduler.Scheduler {
 		sch := scheduler.New(scfg, monitorSvc, monLogs, rates, notifies, announcements, captchas, cipher, gatewaySvc, pcfg, log)
 		sch.SetKV(kvStore)
+		sch.SetBalanceAlerts(balanceAlerts)
 		return sch
 	}
 	sch := schedulerFactory(cfg.Scheduler, cfg.Proxy)
@@ -210,6 +217,7 @@ func main() {
 		GatewayKeys:   gatewayKeys,
 		GatewayUsage:  gatewayUsage,
 		ModelPrices:   modelPrices,
+		BalanceAlerts: balanceAlerts,
 		KV:            kvStore,
 		Log:           log,
 		Frontend:      frontendFS,

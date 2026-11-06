@@ -37,24 +37,26 @@ const (
 //
 // 复用 PasswordCipher 而不新增 TokenCipher 是为了让现有的 GORM 行 / 加密路径 / 迁移流程零变动。
 type Channel struct {
-	ID                     uint           `gorm:"primaryKey" json:"id"`
-	Name                   string         `gorm:"size:128;not null;uniqueIndex" json:"name"`
-	Type                   ChannelType    `gorm:"size:32;not null;index" json:"type"`
-	SiteURL                string         `gorm:"size:512;not null" json:"site_url"`
-	Username               string         `gorm:"size:256;not null" json:"username"`
-	SortOrder              int            `gorm:"not null;default:1" json:"sort_order"`
-	PasswordCipher         string         `gorm:"size:4096;not null" json:"-"`
-	CredentialMode         CredentialMode `gorm:"size:16;not null;default:'password'" json:"credential_mode"`
-	LoginExtraParams       string         `gorm:"type:text" json:"login_extra_params"`
-	TurnstileEnabled       bool           `gorm:"default:false" json:"turnstile_enabled"`
-	IgnoreAnnouncements    bool           `gorm:"default:false" json:"ignore_announcements"`
-	SubscriptionEnabled    bool           `gorm:"default:false" json:"subscription_enabled"`
-	ProxyEnabled           bool           `gorm:"default:false" json:"proxy_enabled"`
-	CaptchaConfigID        *uint          `json:"captcha_config_id,omitempty"`
-	BalanceThreshold       float64        `gorm:"default:0" json:"balance_threshold"`
-	RechargeMultiplier     *float64       `json:"recharge_multiplier,omitempty"`
-	RechargeMultiplierMode string         `gorm:"size:16;not null;default:'divide'" json:"recharge_multiplier_mode"`
-	MonitorEnabled         bool           `gorm:"default:true" json:"monitor_enabled"`
+	ID                  uint           `gorm:"primaryKey" json:"id"`
+	Name                string         `gorm:"size:128;not null;uniqueIndex" json:"name"`
+	Type                ChannelType    `gorm:"size:32;not null;index" json:"type"`
+	SiteURL             string         `gorm:"size:512;not null" json:"site_url"`
+	Username            string         `gorm:"size:256;not null" json:"username"`
+	SortOrder           int            `gorm:"not null;default:1" json:"sort_order"`
+	PasswordCipher      string         `gorm:"size:4096;not null" json:"-"`
+	CredentialMode      CredentialMode `gorm:"size:16;not null;default:'password'" json:"credential_mode"`
+	LoginExtraParams    string         `gorm:"type:text" json:"login_extra_params"`
+	TurnstileEnabled    bool           `gorm:"default:false" json:"turnstile_enabled"`
+	IgnoreAnnouncements bool           `gorm:"default:false" json:"ignore_announcements"`
+	SubscriptionEnabled bool           `gorm:"default:false" json:"subscription_enabled"`
+	ProxyEnabled        bool           `gorm:"default:false" json:"proxy_enabled"`
+	CaptchaConfigID     *uint          `json:"captcha_config_id,omitempty"`
+	BalanceThreshold    float64        `gorm:"default:0" json:"balance_threshold"`
+	// RechargeURL 余额提醒里的充值链接；空则按站点类型推断（NewAPI: /console/topup）。
+	RechargeURL            string   `gorm:"size:512;not null;default:''" json:"recharge_url"`
+	RechargeMultiplier     *float64 `json:"recharge_multiplier,omitempty"`
+	RechargeMultiplierMode string   `gorm:"size:16;not null;default:'divide'" json:"recharge_multiplier_mode"`
+	MonitorEnabled         bool     `gorm:"default:true" json:"monitor_enabled"`
 	// OnlyCreatedKeyGroupsEnabled 开启后仅展示与监听"已创建密钥的分组"。
 	// 影响：渠道卡片 / 分组对话框 / 全局倍率面板的分组列表，以及倍率变动通知。
 	// 不影响 RateSnapshot 本地存储（始终保留全部分组），网关、通知设置
@@ -225,6 +227,9 @@ type NotificationEvent string
 
 const (
 	EventBalanceLow             NotificationEvent = "balance_low"
+	EventBalanceCritical        NotificationEvent = "balance_critical"
+	EventBalanceExhausted       NotificationEvent = "balance_exhausted"
+	EventBalanceRecovered       NotificationEvent = "balance_recovered"
 	EventRateChanged            NotificationEvent = "rate_changed"
 	EventRateStructureChanged   NotificationEvent = "rate_structure_changed"
 	EventRateAdded              NotificationEvent = "rate_added"
@@ -354,11 +359,17 @@ type GatewayProvider struct {
 	AuthStyle          string  `gorm:"size:16;not null;default:'both'" json:"auth_style"`
 	Enabled            bool    `gorm:"not null;default:true;index" json:"enabled"`
 	// ProxyEnabled 与监控渠道一致：全局代理开启且本开关打开时，转发走系统代理配置。
-	ProxyEnabled     bool      `gorm:"not null;default:false" json:"proxy_enabled"`
-	ExtraHeadersJSON string    `gorm:"type:text" json:"extra_headers,omitempty"`
-	Notes            string    `gorm:"size:512;not null;default:''" json:"notes,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ProxyEnabled     bool   `gorm:"not null;default:false" json:"proxy_enabled"`
+	ExtraHeadersJSON string `gorm:"type:text" json:"extra_headers,omitempty"`
+	Notes            string `gorm:"size:512;not null;default:''" json:"notes,omitempty"`
+	// 直连渠道查不到余额：手动登记预算（与网关「账户侧费用」同单位），
+	// 剩余 = BudgetAmount − BudgetSetAt 之后网关记录的 account_stats_cost 之和。
+	BudgetAmount    *float64   `json:"budget_amount,omitempty"`
+	BudgetSetAt     *time.Time `json:"budget_set_at,omitempty"`
+	BudgetThreshold float64    `gorm:"not null;default:0" json:"budget_threshold"`
+	RechargeURL     string     `gorm:"size:512;not null;default:''" json:"recharge_url"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 func (GatewayProvider) TableName() string { return "gateway_providers" }

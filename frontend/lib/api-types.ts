@@ -28,6 +28,9 @@ export type MonitorJob = "login" | "balance" | "rates"
 
 export type NotificationEvent =
   | "balance_low"
+  | "balance_critical"
+  | "balance_exhausted"
+  | "balance_recovered"
   | "rate_changed"
   | "rate_structure_changed"
   | "rate_added"
@@ -40,6 +43,35 @@ export type NotificationEvent =
   | "subscription_weekly_remaining_low"
   | "subscription_monthly_remaining_low"
   | "subscription_expiring"
+
+export type BalanceAlertLevel = "ok" | "warn" | "critical" | "exhausted"
+
+/** GET /balance-alerts：余额分级提醒状态 */
+export interface BalanceAlertStatus {
+  subject_kind: "channel" | "provider"
+  subject_id: number
+  name: string
+  level: BalanceAlertLevel
+  level_since: string
+  last_sent_level?: string
+  last_sent_at?: string
+  last_balance?: number
+  /** 每小时消耗（与余额同单位） */
+  burn_per_hour?: number
+  /** 预计可用小时数；无消耗时为空 */
+  runway_hours?: number
+  reason?: string
+  exhausted_at?: string
+  recharge_at?: string
+  snooze_until?: string
+  recharge_url?: string
+  /** 近 24h 有网关流量 */
+  in_use: boolean
+  budget_amount?: number
+  budget_set_at?: string
+  budget_remaining?: number
+  budget_threshold?: number
+}
 
 export interface Channel {
   id: number
@@ -57,6 +89,8 @@ export interface Channel {
   proxy_enabled: boolean
   captcha_config_id?: number | null
   balance_threshold: number
+  /** 余额提醒里的充值链接；空则 NewAPI 默认 /console/topup */
+  recharge_url?: string
   recharge_multiplier?: number | null
   recharge_multiplier_mode: RechargeMultiplierMode
   monitor_enabled: boolean
@@ -264,6 +298,14 @@ export interface SystemNotificationsConfig {
   subscriptionExpiryThresholdHours: number
   subscriptionAlertCooldownMinutes: number
   sendMaxAttempts: number
+  balanceRunwayWarnHours: number
+  balanceRunwayCriticalHours: number
+  balanceAlertWarnRepeatMinutes: number
+  balanceAlertCriticalRepeatMinutes: number
+  balanceAlertExhaustedRepeatMinutes: number
+  balanceRunwayAllChannels: boolean
+  balanceAutoReleaseOnRecharge: boolean
+  balanceUrgentScanMinutes: number
 }
 
 export interface SystemProxyConfig {
@@ -628,6 +670,11 @@ export interface GatewayProvider {
   proxy_enabled?: boolean
   extra_headers?: string
   notes?: string
+  /** 直连渠道预算（与网关账户侧费用同单位）；剩余 = 预算 − 登记后网关记录的费用 */
+  budget_amount?: number | null
+  budget_set_at?: string | null
+  budget_threshold?: number
+  recharge_url?: string
   created_at: string
   updated_at: string
 }

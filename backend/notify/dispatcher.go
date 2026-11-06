@@ -168,7 +168,7 @@ func matchesRateBatchSubscription(subs []Subscription, event storage.Notificatio
 // suppress 判断是否要按 cooldown 跳过本次发送。
 func (d *Dispatcher) suppress(msg Message) bool {
 	policy := d.Policy()
-	if msg.ChannelID == 0 {
+	if msg.ChannelID == 0 || msg.Managed {
 		return false
 	}
 

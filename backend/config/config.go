@@ -146,6 +146,22 @@ type NotificationsConfig struct {
 	SubscriptionExpiryThresholdHours         int     `mapstructure:"subscriptionExpiryThresholdHours" yaml:"subscriptionExpiryThresholdHours" json:"subscriptionExpiryThresholdHours"`
 	SubscriptionAlertCooldownMinutes         int     `mapstructure:"subscriptionAlertCooldownMinutes" yaml:"subscriptionAlertCooldownMinutes" json:"subscriptionAlertCooldownMinutes"`
 	SendMaxAttempts                          int     `mapstructure:"sendMaxAttempts" yaml:"sendMaxAttempts" json:"sendMaxAttempts"`
+
+	// 余额提醒（按「预计可用时长」分级）：
+	//   - BalanceRunwayWarnHours / BalanceRunwayCriticalHours：预计可用低于该小时数进入 预警 / 紧急；0 关闭该级。
+	//   - BalanceAlert*RepeatMinutes：同一等级重复提醒间隔；等级升高总是立即提醒。
+	//   - BalanceRunwayAllChannels：false 时只对「被启用路由引用且近 24h 有网关流量」的渠道自动估算；
+	//     手填的余额阈值始终生效。
+	//   - BalanceAutoReleaseOnRecharge：识别到充值后自动「解除冷却并测试」。
+	//   - BalanceUrgentScanMinutes：紧急 / 已耗尽渠道的加密采样间隔（分钟），0 关闭。
+	BalanceRunwayWarnHours             float64 `mapstructure:"balanceRunwayWarnHours" yaml:"balanceRunwayWarnHours" json:"balanceRunwayWarnHours"`
+	BalanceRunwayCriticalHours         float64 `mapstructure:"balanceRunwayCriticalHours" yaml:"balanceRunwayCriticalHours" json:"balanceRunwayCriticalHours"`
+	BalanceAlertWarnRepeatMinutes      int     `mapstructure:"balanceAlertWarnRepeatMinutes" yaml:"balanceAlertWarnRepeatMinutes" json:"balanceAlertWarnRepeatMinutes"`
+	BalanceAlertCriticalRepeatMinutes  int     `mapstructure:"balanceAlertCriticalRepeatMinutes" yaml:"balanceAlertCriticalRepeatMinutes" json:"balanceAlertCriticalRepeatMinutes"`
+	BalanceAlertExhaustedRepeatMinutes int     `mapstructure:"balanceAlertExhaustedRepeatMinutes" yaml:"balanceAlertExhaustedRepeatMinutes" json:"balanceAlertExhaustedRepeatMinutes"`
+	BalanceRunwayAllChannels           bool    `mapstructure:"balanceRunwayAllChannels" yaml:"balanceRunwayAllChannels" json:"balanceRunwayAllChannels"`
+	BalanceAutoReleaseOnRecharge       bool    `mapstructure:"balanceAutoReleaseOnRecharge" yaml:"balanceAutoReleaseOnRecharge" json:"balanceAutoReleaseOnRecharge"`
+	BalanceUrgentScanMinutes           int     `mapstructure:"balanceUrgentScanMinutes" yaml:"balanceUrgentScanMinutes" json:"balanceUrgentScanMinutes"`
 }
 
 type ProxyConfig struct {
@@ -514,6 +530,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("notifications.subscriptionExpiryThresholdHours", 0)
 	v.SetDefault("notifications.subscriptionAlertCooldownMinutes", 1440)
 	v.SetDefault("notifications.sendMaxAttempts", 3)
+	v.SetDefault("notifications.balanceRunwayWarnHours", 24)
+	v.SetDefault("notifications.balanceRunwayCriticalHours", 3)
+	v.SetDefault("notifications.balanceAlertWarnRepeatMinutes", 720)
+	v.SetDefault("notifications.balanceAlertCriticalRepeatMinutes", 120)
+	v.SetDefault("notifications.balanceAlertExhaustedRepeatMinutes", 30)
+	v.SetDefault("notifications.balanceRunwayAllChannels", false)
+	v.SetDefault("notifications.balanceAutoReleaseOnRecharge", true)
+	v.SetDefault("notifications.balanceUrgentScanMinutes", 5)
 
 	v.SetDefault("proxy.protocol", "http")
 	v.SetDefault("proxy.port", 0)

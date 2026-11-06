@@ -52,6 +52,9 @@ import type {
 
 const eventMeta: Record<NotificationEvent, { icon: LucideIcon; cls: string }> = {
   balance_low: { icon: AlertTriangle, cls: "text-warning" },
+  balance_critical: { icon: AlertTriangle, cls: "text-danger" },
+  balance_exhausted: { icon: ShieldX, cls: "text-danger" },
+  balance_recovered: { icon: RefreshCw, cls: "text-brand" },
   login_failed: { icon: ShieldX, cls: "text-danger" },
   captcha_failed: { icon: KeyRound, cls: "text-danger" },
   rate_changed: { icon: ArrowUpRight, cls: "text-brand" },

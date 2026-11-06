@@ -21,6 +21,7 @@ type Scheduler struct {
 	log           *slog.Logger
 	cron          *cron.Cron
 	monitor       *monitor.Service
+	balanceAlerts balanceAlertTicker
 	monLogs       *storage.MonitorLogs
 	rates         *storage.Rates
 	notifies      *storage.Notifications
@@ -62,6 +63,14 @@ func (s *Scheduler) locked(name string, fn func()) func() {
 		fn()
 	}
 }
+
+// balanceAlertTicker 余额分级提醒的每分钟节拍（紧急渠道加密采样 + 直连渠道预算估算）。
+type balanceAlertTicker interface {
+	Tick(ctx context.Context, refresh func(ctx context.Context, channelIDs []uint))
+}
+
+// SetBalanceAlerts 接入余额分级提醒节拍；须在 Start 之前调用。
+func (s *Scheduler) SetBalanceAlerts(t balanceAlertTicker) { s.balanceAlerts = t }
 
 // gatewayRateResortService 倍率扫描后重排开启了「渠道分组价格倍率重排」的网关组。
 type gatewayRateResortService interface {
@@ -105,6 +114,11 @@ func (s *Scheduler) Start() error {
 			return err
 		}
 	}
+	if s.balanceAlerts != nil {
+		if _, err := s.cron.AddFunc("23 * * * * *", s.locked("balance_alerts", s.runBalanceAlerts)); err != nil {
+			return err
+		}
+	}
 	if s.cfg.RateCron != "" {
 		if _, err := s.cron.AddFunc(s.cfg.RateCron, s.locked("rates", s.runRates)); err != nil {
 			return err
@@ -130,6 +144,12 @@ func (s *Scheduler) Stop() {
 	if s.cron != nil {
 		<-s.cron.Stop().Done()
 	}
+}
+
+func (s *Scheduler) runBalanceAlerts() {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	s.balanceAlerts.Tick(ctx, s.monitor.RefreshBalances)
 }
 
 func (s *Scheduler) runBalance() {

@@ -124,3 +124,19 @@ func TestRateNotificationBatchMarkdownAndSubscriptionFilter(t *testing.T) {
 		t.Fatalf("message = %#v", msg)
 	}
 }
+
+func TestLegacyBalanceLowSubscriptionCoversBalanceFamily(t *testing.T) {
+	sub := Subscription{ChannelIDs: []uint{7}, Events: []storage.NotificationEvent{storage.EventBalanceLow}}
+	for _, ev := range []storage.NotificationEvent{storage.EventBalanceLow, storage.EventBalanceCritical, storage.EventBalanceExhausted, storage.EventBalanceRecovered} {
+		if !sub.Matches(Message{Event: ev, ChannelID: 7}) {
+			t.Errorf("%s not matched", ev)
+		}
+	}
+	if sub.Matches(Message{Event: storage.EventRateChanged, ChannelID: 7}) {
+		t.Error("rate event matched")
+	}
+	only := Subscription{ChannelIDs: []uint{7}, Events: []storage.NotificationEvent{storage.EventBalanceExhausted}}
+	if only.Matches(Message{Event: storage.EventBalanceLow, ChannelID: 7}) {
+		t.Error("exhausted-only subscription must not get warnings")
+	}
+}

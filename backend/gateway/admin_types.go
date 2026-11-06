@@ -100,6 +100,8 @@ type CreateProviderInput struct {
 	ProxyEnabled       *bool   `json:"proxy_enabled"`
 	ExtraHeadersJSON   string  `json:"extra_headers"`
 	Notes              string  `json:"notes"`
+	RechargeURL        string  `json:"recharge_url"`
+	BudgetThreshold    float64 `json:"budget_threshold"`
 }
 
 // UpdateProviderInput 更新直连渠道（指针字段：nil 表示不改；APIKey 空或省略=不改）。
@@ -114,6 +116,8 @@ type UpdateProviderInput struct {
 	ProxyEnabled       *bool    `json:"proxy_enabled"`
 	ExtraHeadersJSON   *string  `json:"extra_headers"`
 	Notes              *string  `json:"notes"`
+	RechargeURL        *string  `json:"recharge_url"`
+	BudgetThreshold    *float64 `json:"budget_threshold"`
 }
 
 // RouteInput 保存路由时的单条输入。
