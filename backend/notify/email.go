@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/smtp"
-	"strings"
 	"time"
 
 	"github.com/bejix/upstream-ops/backend/storage"
@@ -18,13 +17,14 @@ func init() {
 }
 
 type emailConfig struct {
-	Host     string   `json:"host"`     // smtp.example.com
-	Port     int      `json:"port"`     // 465 / 587
-	Username string   `json:"username"` // SMTP 用户名
-	Password string   `json:"password"` // SMTP 密码 / 授权码
-	From     string   `json:"from"`     // 发件人（可与 Username 不同）
-	To       []string `json:"to"`       // 收件人列表
-	UseTLS   bool     `json:"use_tls"`  // 是否使用隐式 TLS（一般 465 端口）
+	Host       string   `json:"host"`                  // smtp.example.com
+	Port       int      `json:"port"`                  // 465 / 587
+	Username   string   `json:"username"`              // SMTP 用户名
+	Password   string   `json:"password"`              // SMTP 密码 / 授权码
+	From       string   `json:"from"`                  // 发件人（可与 Username 不同）
+	To         []string `json:"to"`                    // 收件人列表
+	UseTLS     bool     `json:"use_tls"`               // 是否使用隐式 TLS（一般 465 端口）
+	ConsoleURL string   `json:"console_url,omitempty"` // 可选：通知详情入口
 }
 
 type email struct{ cfg emailConfig }
@@ -46,7 +46,10 @@ func (e *email) Send(ctx context.Context, msg Message) error {
 	addr := fmt.Sprintf("%s:%d", e.cfg.Host, e.cfg.Port)
 	auth := smtp.PlainAuth("", e.cfg.Username, e.cfg.Password, e.cfg.Host)
 
-	body := buildEmailBody(e.cfg.From, e.cfg.To, msg.Subject, msg.Body)
+	body, err := buildEmailBody(e.cfg.From, e.cfg.To, msg, e.cfg.ConsoleURL, time.Now())
+	if err != nil {
+		return fmt.Errorf("render email: %w", err)
+	}
 
 	// 简单 deadline，避免完全阻塞调度。
 	done := make(chan error, 1)
@@ -66,17 +69,6 @@ func (e *email) Send(ctx context.Context, msg Message) error {
 	case <-time.After(45 * time.Second):
 		return errors.New("smtp send timeout")
 	}
-}
-
-func buildEmailBody(from string, to []string, subject, body string) string {
-	headers := []string{
-		"From: " + from,
-		"To: " + strings.Join(to, ", "),
-		"Subject: " + subject,
-		"MIME-Version: 1.0",
-		"Content-Type: text/plain; charset=UTF-8",
-	}
-	return strings.Join(headers, "\r\n") + "\r\n\r\n" + body
 }
 
 // sendTLS 通过 SMTPS（隐式 TLS，常见于 465）发送邮件。
