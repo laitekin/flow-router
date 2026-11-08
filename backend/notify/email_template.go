@@ -39,24 +39,24 @@ type emailView struct {
 }
 
 func notificationEmailTheme(event storage.NotificationEvent) emailTheme {
-	theme := emailTheme{"系统通知", "i", "#0f766e", "#e6f3ef", "有一条新的运营通知。"}
+	theme := emailTheme{"系统通知", "i", "#525252", "", "有一条新的运营通知。"}
 	switch event {
 	case storage.EventBalanceExhausted:
-		theme = emailTheme{"余额耗尽", "!", "#c0352b", "#fdeeec", "额度已耗尽，相关路由可能已停止服务，请尽快处理。"}
+		theme = emailTheme{"余额耗尽", "!", "#dc2626", "", "额度已耗尽，相关路由可能已停止服务，请尽快处理。"}
 	case storage.EventBalanceCritical:
-		theme = emailTheme{"余额紧急", "!", "#c0352b", "#fdeeec", "额度即将耗尽，请优先检查受影响的分组与路由。"}
+		theme = emailTheme{"余额紧急", "!", "#dc2626", "", "额度即将耗尽，请优先检查受影响的分组与路由。"}
 	case storage.EventBalanceLow, storage.EventSubscriptionDailyLow, storage.EventSubscriptionWeeklyLow, storage.EventSubscriptionMonthlyLow:
-		theme = emailTheme{"额度预警", "!", "#b26a00", "#fdf3e1", "可用额度偏低，建议提前安排充值。"}
+		theme = emailTheme{"额度预警", "!", "#d97706", "", "可用额度偏低，建议提前安排充值。"}
 	case storage.EventSubscriptionExpiring:
-		theme = emailTheme{"订阅到期", "!", "#b26a00", "#fdf3e1", "订阅即将到期，请及时续期。"}
+		theme = emailTheme{"订阅到期", "!", "#d97706", "", "订阅即将到期，请及时续期。"}
 	case storage.EventBalanceRecovered:
-		theme = emailTheme{"已恢复", "✓", "#12805c", "#e5f4ec", "额度已补充，以下为路由恢复结果。"}
+		theme = emailTheme{"已恢复", "✓", "#16a34a", "", "额度已补充，以下为路由恢复结果。"}
 	case storage.EventRateChanged, storage.EventRateStructureChanged, storage.EventRateAdded, storage.EventRateRemoved:
-		theme = emailTheme{"分组变动", "⇅", "#2f5ea8", "#eaf0fa", "本轮扫描发现以下分组或倍率变动。"}
+		theme = emailTheme{"分组变动", "⇅", "#2563eb", "", "本轮扫描发现以下分组或倍率变动。"}
 	case storage.EventMonitorFailed, storage.EventLoginFailed, storage.EventCaptchaFailed:
-		theme = emailTheme{"监测异常", "×", "#c0352b", "#fdeeec", "本轮监测或渠道认证未能完成。"}
+		theme = emailTheme{"监测异常", "×", "#dc2626", "", "本轮监测或渠道认证未能完成。"}
 	case storage.EventAnnouncement:
-		theme = emailTheme{"渠道公告", "i", "#2f5ea8", "#eaf0fa", "渠道发布了一条新公告。"}
+		theme = emailTheme{"渠道公告", "i", "#2563eb", "", "渠道发布了一条新公告。"}
 	}
 	return theme
 }
@@ -198,19 +198,19 @@ func renderEmailHTML(msg Message, consoleURL string, at time.Time) (string, erro
 }
 
 const (
-	emailInk    = "#14231f"
-	emailText   = "#33463f"
-	emailMuted  = "#6b7d77"
-	emailLine   = "#e7ecea"
-	emailMono   = "'SFMono-Regular',Menlo,Consolas,monospace"
-	emailUp     = "#c0352b"
-	emailDown   = "#12805c"
-	emailCodeBg = "#f0f4f2"
+	emailInk    = "#0a0a0a"
+	emailText   = "#262626"
+	emailMuted  = "#737373"
+	emailLine   = "#e5e5e5"
+	emailMono   = "'SF Mono','SFMono-Regular',Menlo,Consolas,monospace"
+	emailUp     = "#dc2626"
+	emailDown   = "#16a34a"
+	emailCodeBg = "#f5f5f5"
 )
 
 func renderEmailError(body string) string {
 	return `<p class="muted" style="margin:0 0 8px;font-size:12px;line-height:18px;color:` + emailMuted + `;">错误信息</p>` +
-		`<div class="soft" style="background-color:#f6f8f7;border:1px solid ` + emailLine + `;border-radius:10px;padding:14px 16px;font-family:` + emailMono + `;font-size:13px;line-height:1.7;color:` + emailText + `;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin:0 0 18px;">` + html.EscapeString(strings.TrimSpace(body)) + `</div>`
+		`<div class="code" style="background-color:` + emailCodeBg + `;border-radius:6px;padding:14px 16px;font-family:` + emailMono + `;font-size:13px;line-height:1.7;color:` + emailText + `;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin:0 0 18px;">` + html.EscapeString(strings.TrimSpace(body)) + `</div>`
 }
 
 // Render the CommonMark subset used by our notifications. Raw upstream HTML is
@@ -223,7 +223,7 @@ func renderEmailInline(text string) string {
 		token := text[match[0]:match[1]]
 		switch {
 		case strings.HasPrefix(token, "`"):
-			b.WriteString(`<code class="soft" style="font-family:` + emailMono + `;font-size:12px;background-color:` + emailCodeBg + `;color:#25473e;padding:2px 6px;border-radius:5px;">` + html.EscapeString(strings.Trim(token, "`")) + `</code>`)
+			b.WriteString(`<code class="code" style="font-family:` + emailMono + `;font-size:12px;background-color:` + emailCodeBg + `;color:` + emailText + `;padding:2px 5px;border-radius:4px;">` + html.EscapeString(strings.Trim(token, "`")) + `</code>`)
 		case strings.HasPrefix(token, "**"):
 			b.WriteString(`<strong>` + html.EscapeString(strings.TrimPrefix(strings.TrimSuffix(token, "**"), "**")) + `</strong>`)
 		default:
@@ -234,7 +234,7 @@ func renderEmailInline(text string) string {
 				target = token[cut+2 : len(token)-1]
 			}
 			if safeEmailURL(target) != "" {
-				b.WriteString(`<a href="` + html.EscapeString(target) + `" style="color:#0f766e;text-decoration:underline;word-break:break-all;">` + html.EscapeString(label) + `</a>`)
+				b.WriteString(`<a href="` + html.EscapeString(target) + `" style="color:#0a0a0a;text-decoration:underline;text-underline-offset:2px;word-break:break-all;">` + html.EscapeString(label) + `</a>`)
 			} else {
 				b.WriteString(html.EscapeString(token))
 			}
@@ -251,8 +251,8 @@ var (
 	emailNamedItem   = regexp.MustCompile(`^\*\*([^*\n]+)\*\*：(.+)$`)
 )
 
-func emailPill(text, color, bg string) string {
-	return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background-color:` + bg + `;color:` + color + `;font-size:12px;line-height:18px;font-weight:600;white-space:nowrap;">` + html.EscapeString(text) + `</span>`
+func emailDelta(text, color string) string {
+	return `<span style="display:inline-block;min-width:56px;padding-left:12px;text-align:right;color:` + color + `;font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;">` + html.EscapeString(text) + `</span>`
 }
 
 // renderEmailRatio turns "倍率：`0.8x` 下调 `0.65x`" into "0.8x → 0.65x  -18.8%".
@@ -260,15 +260,15 @@ func renderEmailRatio(detail string) (string, bool) {
 	if m := emailRatioChange.FindStringSubmatch(detail); m != nil {
 		oldV, _ := strconv.ParseFloat(m[1], 64)
 		newV, _ := strconv.ParseFloat(m[3], 64)
-		out := `<span class="muted" style="color:` + emailMuted + `;text-decoration:line-through;font-family:` + emailMono + `;font-size:13px;">` + m[1] + `x</span>` +
-			`<span class="muted" style="color:` + emailMuted + `;">&nbsp;→&nbsp;</span>` +
-			`<strong class="ink" style="color:` + emailInk + `;font-family:` + emailMono + `;font-size:14px;">` + m[3] + `x</strong>`
+		out := `<span class="muted" style="color:` + emailMuted + `;font-variant-numeric:tabular-nums;">` + m[1] + `×</span>` +
+			`<span class="muted" style="color:#a3a3a3;">&nbsp;&nbsp;→&nbsp;&nbsp;</span>` +
+			`<span class="ink" style="color:` + emailInk + `;font-weight:500;font-variant-numeric:tabular-nums;">` + m[3] + `×</span>`
 		if oldV > 0 && newV != oldV {
 			pct := (newV - oldV) / oldV * 100
 			if pct > 0 {
-				out += "&nbsp; " + emailPill(fmt.Sprintf("↑ %.1f%%", pct), emailUp, "#fdeeec")
+				out += emailDelta(fmt.Sprintf("+%.1f%%", pct), emailUp)
 			} else {
-				out += "&nbsp; " + emailPill(fmt.Sprintf("↓ %.1f%%", -pct), emailDown, "#e5f4ec")
+				out += emailDelta(fmt.Sprintf("−%.1f%%", -pct), emailDown)
 			}
 		}
 		return out, true
@@ -280,7 +280,7 @@ func renderEmailRatio(detail string) (string, bool) {
 			style = `color:` + emailMuted + `;text-decoration:line-through;`
 			cls = "muted"
 		}
-		return `<strong class="` + cls + `" style="` + style + `font-family:` + emailMono + `;font-size:14px;">` + m[2] + `x</strong>`, true
+		return `<span class="` + cls + `" style="` + style + `font-weight:500;font-variant-numeric:tabular-nums;">` + m[2] + `×</span>`, true
 	}
 	return "", false
 }
@@ -308,7 +308,7 @@ func renderEmailContent(body, title string, theme emailTheme) string {
 			`<td valign="top" class="rule" style="padding:11px 0;border-bottom:1px solid ` + emailLine + `;color:` + emailText + `;font-size:14px;line-height:1.7;overflow-wrap:anywhere;word-break:break-word;">` + right + `</td></tr>`)
 	}
 	sectionLabel := func(text string) {
-		b.WriteString(`<p class="muted" style="margin:22px 0 8px;font-size:12px;line-height:18px;font-weight:600;letter-spacing:.4px;color:` + emailMuted + `;">` + text + `</p>`)
+		b.WriteString(`<p class="muted" style="margin:20px 0 6px;font-size:12px;line-height:18px;color:` + emailMuted + `;">` + text + `</p>`)
 	}
 	for _, raw := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
 		line := strings.TrimSpace(raw)
@@ -324,17 +324,16 @@ func renderEmailContent(body, title string, theme emailTheme) string {
 				if !ok {
 					right = renderEmailInline(m[2])
 				}
-				b.WriteString(`<tr><td valign="top" class="rule ink" style="padding:11px 12px 11px 0;border-bottom:1px solid ` + emailLine + `;color:` + emailInk + `;font-size:14px;line-height:1.7;font-weight:600;overflow-wrap:anywhere;word-break:break-word;">` + html.EscapeString(m[1]) + `</td>` +
+				b.WriteString(`<tr><td valign="top" class="rule ink" style="padding:11px 12px 11px 0;border-bottom:1px solid ` + emailLine + `;color:` + emailInk + `;font-size:14px;line-height:1.7;overflow-wrap:anywhere;word-break:break-word;">` + html.EscapeString(m[1]) + `</td>` +
 					`<td valign="top" align="right" class="rule" style="padding:11px 0;border-bottom:1px solid ` + emailLine + `;color:` + emailText + `;font-size:14px;line-height:1.7;">` + right + `</td></tr>`)
 				continue
 			}
 			name, detail, ok := strings.Cut(item, "：")
 			cell := renderEmailInline(item)
 			if ok && utf8.RuneCountInString(name) <= 40 {
-				cell = `<span class="ink" style="color:` + emailInk + `;font-weight:600;">` + renderEmailInline(name) + `</span><br><span class="muted" style="color:` + emailMuted + `;font-size:13px;">` + renderEmailInline(detail) + `</span>`
+				cell = `<span class="ink" style="color:` + emailInk + `;">` + renderEmailInline(name) + `</span><br><span class="muted" style="color:` + emailMuted + `;font-size:13px;">` + renderEmailInline(detail) + `</span>`
 			}
-			b.WriteString(`<tr><td valign="top" class="rule" style="width:18px;padding:11px 0;border-bottom:1px solid ` + emailLine + `;"><span style="display:inline-block;width:6px;height:6px;border-radius:3px;background-color:` + theme.Color + `;vertical-align:middle;"></span></td>` +
-				`<td valign="top" colspan="1" class="rule" style="padding:11px 0;border-bottom:1px solid ` + emailLine + `;color:` + emailText + `;font-size:14px;line-height:1.7;overflow-wrap:anywhere;word-break:break-word;">` + cell + `</td></tr>`)
+			b.WriteString(`<tr><td valign="top" colspan="2" class="rule" style="padding:11px 0;border-bottom:1px solid ` + emailLine + `;color:` + emailText + `;font-size:14px;line-height:1.7;overflow-wrap:anywhere;word-break:break-word;">` + cell + `</td></tr>`)
 			continue
 		}
 		switch {
@@ -346,7 +345,7 @@ func renderEmailContent(body, title string, theme emailTheme) string {
 			}
 		case strings.HasPrefix(line, "## "):
 			closeBlock()
-			b.WriteString(`<h2 class="ink" style="font-size:16px;line-height:1.5;margin:26px 0 4px;color:` + emailInk + `;">` + renderEmailInline(line[3:]) + `</h2>`)
+			b.WriteString(`<h2 class="ink" style="font-size:15px;line-height:1.5;font-weight:600;margin:28px 0 0;color:` + emailInk + `;">` + renderEmailInline(line[3:]) + `</h2>`)
 		case strings.HasPrefix(line, "### "):
 			closeBlock()
 			sectionLabel(renderEmailInline(line[4:]))
@@ -356,7 +355,7 @@ func renderEmailContent(body, title string, theme emailTheme) string {
 		case strings.HasPrefix(line, "⚠"):
 			closeBlock()
 			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "⚠"), "️"))
-			b.WriteString(`<table role="presentation" width="100%" style="width:100%;margin:4px 0 18px;"><tr><td class="warn" style="padding:13px 16px;background-color:#fdf3e1;border-left:3px solid #d58a12;border-radius:0 8px 8px 0;color:#6e4a0b;font-size:14px;line-height:1.7;"><strong>注意&nbsp;</strong>` + renderEmailInline(line) + `</td></tr></table>`)
+			b.WriteString(`<table role="presentation" width="100%" style="width:100%;margin:4px 0 24px;"><tr><td style="padding:2px 0 2px 14px;border-left:2px solid ` + theme.Color + `;color:` + emailText + `;font-size:14px;line-height:1.7;">` + renderEmailInline(line) + `</td></tr></table>`)
 		default:
 			label, value, ok := strings.Cut(line, "：")
 			label = strings.TrimSpace(label)
