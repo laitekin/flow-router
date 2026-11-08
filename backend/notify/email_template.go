@@ -3,6 +3,7 @@ package notify
 import (
 	"bytes"
 	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"html/template"
@@ -25,17 +26,29 @@ import (
 //go:embed email_template.html
 var emailHTMLSource string
 
+// Product mark (frontend/public/icon.svg rendered to PNG). Sent as an inline
+// CID part because Gmail and others strip SVG and data: images.
+//
+//go:embed email_logo.png
+var emailLogoPNG []byte
+
+const emailLogoCID = "flow-router-logo"
+
+// emailBrand is the product accent (--brand in frontend/app/globals.css).
+const emailBrand = "#2563eb"
+
 var emailHTMLTemplate = template.Must(template.New("notification-email").Parse(emailHTMLSource))
 var emailInlinePattern = regexp.MustCompile("`[^`\\n]+`|\\*\\*[^*\\n]+\\*\\*|\\[[^]\\n]+\\]\\(https?://[^\\s)]+\\)|https?://[^\\s<>]+")
 
 type emailTheme struct{ Label, Icon, Color, Background, Description string }
 type emailMetric struct{ Label, Value, Unit, Note string }
 type emailView struct {
-	Title, Preheader, Date, Description, ActionURL, ActionLabel, SecondaryURL, SecondaryLabel string
-	Theme                                                                                     emailTheme
-	Metrics                                                                                   []emailMetric
-	MetricWidth                                                                               string
-	Body                                                                                      template.HTML
+	Title, Preheader, Date, Description, ActionURL, ActionLabel, SecondaryURL, SecondaryLabel, Brand string
+	LogoSrc                                                                                          template.URL
+	Theme                                                                                            emailTheme
+	Metrics                                                                                          []emailMetric
+	MetricWidth                                                                                      string
+	Body                                                                                             template.HTML
 }
 
 func notificationEmailTheme(event storage.NotificationEvent) emailTheme {
@@ -115,9 +128,13 @@ func isFailureEvent(e storage.NotificationEvent) bool {
 }
 
 func renderEmailHTML(msg Message, consoleURL string, at time.Time) (string, error) {
+	return renderEmailHTMLWithLogo(msg, consoleURL, at, "cid:"+emailLogoCID)
+}
+
+func renderEmailHTMLWithLogo(msg Message, consoleURL string, at time.Time, logoSrc template.URL) (string, error) {
 	theme := notificationEmailTheme(msg.Event)
 	zone := time.FixedZone("CST", 8*60*60)
-	view := emailView{Title: emailTitle(msg.Subject), Theme: theme, Description: theme.Description, Date: at.In(zone).Format("01-02 15:04")}
+	view := emailView{LogoSrc: logoSrc, Brand: emailBrand, Title: emailTitle(msg.Subject), Theme: theme, Description: theme.Description, Date: at.In(zone).Format("01-02 15:04")}
 	if view.Title == "" {
 		view.Title = theme.Label
 	}
@@ -234,7 +251,7 @@ func renderEmailInline(text string) string {
 				target = token[cut+2 : len(token)-1]
 			}
 			if safeEmailURL(target) != "" {
-				b.WriteString(`<a href="` + html.EscapeString(target) + `" style="color:#0a0a0a;text-decoration:underline;text-underline-offset:2px;word-break:break-all;">` + html.EscapeString(label) + `</a>`)
+				b.WriteString(`<a href="` + html.EscapeString(target) + `" style="color:` + emailBrand + `;text-decoration:none;word-break:break-all;">` + html.EscapeString(label) + `</a>`)
 			} else {
 				b.WriteString(html.EscapeString(token))
 			}
@@ -384,23 +401,58 @@ func buildEmailBody(from string, to []string, msg Message, consoleURL string, at
 	if err != nil {
 		return "", err
 	}
-	var body bytes.Buffer
-	w := multipart.NewWriter(&body)
-	for _, part := range []struct{ kind, body string }{{"text/plain", msg.Body}, {"text/html", htmlBody}} {
+	writeQP := func(w *multipart.Writer, kind, content string) error {
 		h := make(textproto.MIMEHeader)
-		h.Set("Content-Type", part.kind+"; charset=UTF-8")
+		h.Set("Content-Type", kind+"; charset=UTF-8")
 		h.Set("Content-Transfer-Encoding", "quoted-printable")
 		out, err := w.CreatePart(h)
 		if err != nil {
-			return "", err
+			return err
 		}
 		q := quotedprintable.NewWriter(out)
-		if _, err = q.Write([]byte(part.body)); err != nil {
-			return "", err
+		if _, err = q.Write([]byte(content)); err != nil {
+			return err
 		}
-		if err = q.Close(); err != nil {
-			return "", err
-		}
+		return q.Close()
+	}
+	// multipart/alternative { text/plain, multipart/related { text/html, logo } }
+	var related bytes.Buffer
+	rw := multipart.NewWriter(&related)
+	if err = writeQP(rw, "text/html", htmlBody); err != nil {
+		return "", err
+	}
+	lh := make(textproto.MIMEHeader)
+	lh.Set("Content-Type", "image/png")
+	lh.Set("Content-Transfer-Encoding", "base64")
+	lh.Set("Content-ID", "<"+emailLogoCID+">")
+	lh.Set("Content-Disposition", `inline; filename="flow-router.png"`)
+	logo, err := rw.CreatePart(lh)
+	if err != nil {
+		return "", err
+	}
+	enc := base64.StdEncoding.EncodeToString(emailLogoPNG)
+	for len(enc) > 76 {
+		fmt.Fprintf(logo, "%s\r\n", enc[:76])
+		enc = enc[76:]
+	}
+	fmt.Fprintf(logo, "%s\r\n", enc)
+	if err = rw.Close(); err != nil {
+		return "", err
+	}
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	if err = writeQP(w, "text/plain", msg.Body); err != nil {
+		return "", err
+	}
+	rh := make(textproto.MIMEHeader)
+	rh.Set("Content-Type", `multipart/related; type="text/html"; boundary="`+rw.Boundary()+`"`)
+	rel, err := w.CreatePart(rh)
+	if err != nil {
+		return "", err
+	}
+	if _, err = rel.Write(related.Bytes()); err != nil {
+		return "", err
 	}
 	if err = w.Close(); err != nil {
 		return "", err

@@ -1,6 +1,8 @@
 package notify
 
 import (
+	"encoding/base64"
+	"html/template"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -42,13 +44,30 @@ func TestEmailMIMEPreservesPlainTextAndUnicodeSubject(t *testing.T) {
 	if err != nil || strings.ReplaceAll(string(text), "\r\n", "\n") != msg.Body {
 		t.Fatalf("plain text lost: %q %v", text, err)
 	}
-	part, err := r.NextRawPart()
+	relPart, err := r.NextRawPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relMedia, relParams, err := mime.ParseMediaType(relPart.Header.Get("Content-Type"))
+	if err != nil || relMedia != "multipart/related" {
+		t.Fatalf("related media=%s %v", relMedia, err)
+	}
+	rr := multipart.NewReader(relPart, relParams["boundary"])
+	part, err := rr.NextRawPart()
 	if err != nil {
 		t.Fatal(err)
 	}
 	html, err := io.ReadAll(quotedprintable.NewReader(part))
 	if err != nil {
 		t.Fatal(err)
+	}
+	logo, err := rr.NextRawPart()
+	if err != nil || logo.Header.Get("Content-ID") != "<"+emailLogoCID+">" || !strings.Contains(string(html), `src="cid:`+emailLogoCID+`"`) {
+		t.Fatalf("inline logo missing: %v", err)
+	}
+	png, err := io.ReadAll(base64.NewDecoder(base64.StdEncoding, logo))
+	if err != nil || string(png) != string(emailLogoPNG) {
+		t.Fatalf("logo payload corrupted: %v", err)
 	}
 	if !strings.Contains(string(html), msg.Subject) || !strings.Contains(string(html), "打开运营控制台") || strings.Contains(string(html), "ZgotmplZ") {
 		t.Fatalf("HTML rendering failed: %s", html)
@@ -107,7 +126,7 @@ func TestEmailPreviewArtifacts(t *testing.T) {
 		"subscription":  {Event: storage.EventSubscriptionDailyLow, Subject: "大蛇 订阅日剩余额度不足", Body: "渠道：大蛇\n维度：日\n阈值：剩余 20.0%\n· Claude Kiro 高缓存：已用 $41.2000 / $50.0000，剩余 $8.8000（17.6%），重置 11-09 00:00"},
 	}
 	for name, msg := range samples {
-		html, err := renderEmailHTML(msg, "https://flow.example.com", time.Date(2026, 11, 8, 7, 30, 0, 0, time.UTC))
+		html, err := renderEmailHTMLWithLogo(msg, "https://flow.example.com", time.Date(2026, 11, 8, 7, 30, 0, 0, time.UTC), template.URL("data:image/png;base64,"+base64.StdEncoding.EncodeToString(emailLogoPNG)))
 		if err != nil {
 			t.Fatal(err)
 		}
