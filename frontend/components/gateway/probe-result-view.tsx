@@ -71,6 +71,17 @@ function Checks({ checks }: { checks: ProbeCheck[] }) {
 }
 
 function Metrics({ s }: { s: GatewayProbeSample }) {
+  if (s.image_info || (s.images?.length ?? 0) > 0) {
+    const n = s.images?.length ?? 0
+    const img = [
+      `出图 ${n} 张`,
+      `耗时 ${sec(s.duration_ms)}`,
+      n > 1 ? `平均 ${sec(Math.round(s.duration_ms / n))}/张` : null,
+      s.input_tokens != null ? `输入 ${num(s.input_tokens)} tok` : null,
+      s.output_tokens != null ? `输出 ${num(s.output_tokens)} tok` : null,
+    ].filter(Boolean)
+    return <div className="text-[11px] tabular-nums text-muted-foreground">{img.join(" · ")}</div>
+  }
   const parts = [
     `首字 ${sec(s.first_text_ms)}`,
     s.first_token_ms != null && s.first_token_ms !== s.first_text_ms ? `首 token ${sec(s.first_token_ms)}` : null,
@@ -127,7 +138,8 @@ function SampleBody({ run, s }: { run: ProbeRun; s: GatewayProbeSample }) {
         {meta.length ? <div className="text-[11px] text-muted-foreground tabular-nums">{meta.join(" · ")}</div> : null}
         <div className={cn("grid gap-1.5", images.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
           {images.map((src, i) => {
-            const kb = info?.bytes?.[i] ? `${(info.bytes[i] / 1024).toFixed(0)} KB` : null
+            const bytes = info?.bytes?.[i]
+            const kb = bytes ? (bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`) : null
             const img = <img src={src} referrerPolicy="no-referrer" alt={`${run.label ?? ""} ${s.label} 图片 ${i + 1}`} className={cn("w-full rounded border object-contain", checker)} />
             return (
               <figure key={i} className="space-y-0.5">
