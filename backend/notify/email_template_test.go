@@ -50,7 +50,7 @@ func TestEmailMIMEPreservesPlainTextAndUnicodeSubject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(html), msg.Subject) || !strings.Contains(string(html), "查看运营控制台") || strings.Contains(string(html), "ZgotmplZ") {
+	if !strings.Contains(string(html), msg.Subject) || !strings.Contains(string(html), "打开运营控制台") || strings.Contains(string(html), "ZgotmplZ") {
 		t.Fatalf("HTML rendering failed: %s", html)
 	}
 	if _, err = r.NextPart(); err != io.EOF {
@@ -67,7 +67,7 @@ func TestEmailEscapesUpstreamContentAndUnsafeLinks(t *testing.T) {
 	if strings.Contains(html, "<script>") || strings.Contains(html, "<img src=x") || strings.Contains(html, `href="javascript:`) || strings.Contains(html, "ZgotmplZ") {
 		t.Fatal("untrusted content became active markup")
 	}
-	for _, want := range []string{"&lt;script&gt;", "<strong>Group A</strong>", "<code ", `href="https://pay.example.com/?a=1&amp;b=2"`} {
+	for _, want := range []string{"&lt;script&gt;", ">Group A</td>", "<code ", `href="https://pay.example.com/?a=1&amp;b=2"`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing safely formatted content %q", want)
 		}
@@ -98,12 +98,13 @@ func TestEmailPreviewArtifacts(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	runway := 3.6
+	runway, burn := 3.6, 7.92
 	samples := map[string]Message{
-		"balance-alert": {Event: storage.EventBalanceCritical, Subject: "Astra 专线预计 3.6 小时后耗尽", Body: "当前余额：$28.50（阈值 $50.00）\n消耗速度：约 $7.92/小时\n在用：GPT Astra 专项（第 1 优先，路由 #36）\n⚠️ GPT Astra 专项没有其它可用路由，耗尽后将无法服务。\n\n建议：补充额度后，系统将自动检测并恢复可用路由。", Extra: map[string]any{"balance": 28.5, "runway_hours": &runway, "recharge_url": "https://example.com/recharge"}},
-		"rate-change":   BuildRateNotificationBatchMessage(RateNotificationBatch{Changed: []ChannelRateChange{{ChannelID: 1, ChannelName: "Flow-Node", Change: RateChange{GroupName: "GPT 对接专属分组", OldRatio: 0.8, NewRatio: 0.65}}, {ChannelID: 1, ChannelName: "Flow-Node", Change: RateChange{GroupName: "Astra 专线", OldRatio: 1, NewRatio: 0.9}}}, Added: []ChannelRateChange{{ChannelID: 2, ChannelName: "大蛇", Change: RateChange{GroupName: "Claude Kiro 高缓存", NewRatio: 0.4}}}}),
-		"recovered":     {Event: storage.EventBalanceRecovered, Subject: "Astra 专线已充值，2 条路由恢复调度", Body: "已恢复调度：\n- GPT Astra 专项 · 路由 #36\n- GPT 综合 · 路由 #22\n\n检测结果：两条路由均已通过连接测试，已重新加入候选列表。", Extra: map[string]any{"balance": 120.0}},
-		"long-error":    {Event: storage.EventMonitorFailed, Subject: "渠道认证异常，需要检查登录状态", Body: "渠道：Astra / 测试渠道\n错误：upstream HTTP 503: the original upstream for this conversation is cooling down; retry later or start a new conversation\n\n" + strings.Repeat("长模型名称-", 24) + "\n请打开控制台查看最新检测结果。"},
+		"balance-alert": {Event: storage.EventBalanceCritical, Subject: "【余额紧急】Astra 专线 预计 3.6 小时后耗尽", Body: "当前余额：$28.50（阈值 $50.00）\n消耗速度：约 $7.92/小时（$190.08/天）\n预计可用：3.6 小时（约 11-08 19:06 耗尽）\n在用：GPT Astra 专项（第 1 优先，路由 #36）、GPT 综合（第 2 优先，路由 #22）\n⚠️ 以下分组没有其它可用路由，耗尽后将无法服务：GPT Astra 专项\n充值：https://example.com/recharge", Extra: map[string]any{"balance": 28.5, "runway_hours": &runway, "burn_per_hour": &burn, "recharge_url": "https://example.com/recharge"}},
+		"rate-change":   BuildRateNotificationBatchMessage(RateNotificationBatch{Changed: []ChannelRateChange{{ChannelID: 1, ChannelName: "Flow-Node", Change: RateChange{GroupName: "GPT 对接专属分组", OldRatio: 0.8, NewRatio: 0.65}}, {ChannelID: 1, ChannelName: "Flow-Node", Change: RateChange{GroupName: "Astra 专线", OldRatio: 1, NewRatio: 1.2}}}, Added: []ChannelRateChange{{ChannelID: 2, ChannelName: "大蛇", Change: RateChange{GroupName: "Claude Kiro 高缓存", NewRatio: 0.4}}}, Removed: []ChannelRateChange{{ChannelID: 2, ChannelName: "大蛇", Change: RateChange{GroupName: "Gemini 试用", OldRatio: 0.3}}}}),
+		"recovered":     {Event: storage.EventBalanceRecovered, Subject: "【已充值】Astra 专线 已自动恢复 2 条路由", Body: "已恢复调度：\n- 分组 GPT Astra 专项 路由 #36\n- 分组 GPT 综合 路由 #22\n仍未恢复（冷却保留）：\n- 分组 Claude 备用 路由 #41：upstream HTTP 429 rate limited", Extra: map[string]any{"balance": 120.0}},
+		"long-error":    {Event: storage.EventLoginFailed, Subject: "Astra 渠道登录失败", Body: "upstream HTTP 503: the original upstream for this conversation is cooling down; retry later or start a new conversation " + strings.Repeat("长模型名称-", 12)},
+		"subscription":  {Event: storage.EventSubscriptionDailyLow, Subject: "大蛇 订阅日剩余额度不足", Body: "渠道：大蛇\n维度：日\n阈值：剩余 20.0%\n· Claude Kiro 高缓存：已用 $41.2000 / $50.0000，剩余 $8.8000（17.6%），重置 11-09 00:00"},
 	}
 	for name, msg := range samples {
 		html, err := renderEmailHTML(msg, "https://flow.example.com", time.Date(2026, 11, 8, 7, 30, 0, 0, time.UTC))
