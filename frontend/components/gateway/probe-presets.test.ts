@@ -7,10 +7,12 @@ import {
   buildProbeRequest,
   cacheGroup,
   cacheTestStats,
+  cleanImageOptions,
   evaluateSample,
   extractHtml,
   extractJson,
   extractSvg,
+  imageSizeHint,
   matchExpect,
   needlePassphrase,
   normalizeTemplate,
@@ -179,4 +181,40 @@ test("normalizeTemplate keeps image settings and rejects bad sizes", () => {
   assert.equal(ok.view, "image")
   assert.equal(ok.imageSize, "1024x1536")
   assert.equal(normalizeTemplate({ name: "x", imageSize: "huge" }).imageSize, undefined)
+})
+
+test("image options: only valid gpt-image params reach the request", () => {
+  const t = { ...tpl("builtin:image"), imageSize: "2560x1440", imageOptions: { quality: "xhigh" as const, output_format: "jpeg" as const, background: "transparent" as const, output_compression: 80, n: 3, frame_count: 8 } }
+  const req = buildProbeRequest(t, buildProbePlan(t), "gpt-image-2.6-sunburst", 1)
+  // transparent is dropped for jpeg, frame_count only applies to gif
+  assert.deepEqual(req.image_options, { quality: "xhigh", output_format: "jpeg", output_compression: 80, n: 3 })
+  assert.equal(req.image_size, "2560x1440")
+  const chat = buildProbeRequest({ ...t, protocol: "chat" }, buildProbePlan(t), "gpt-5", 1)
+  assert.equal("image_options" in chat, false)
+  assert.deepEqual(cleanImageOptions({ output_format: "svg", n: 4 }), { output_format: "svg" })
+  assert.deepEqual(cleanImageOptions({ output_format: "gif", frame_count: 6, frame_duration_ms: 120, output_compression: 50 }), { output_format: "gif", frame_count: 6, frame_duration_ms: 120 })
+  assert.equal(cleanImageOptions({}), undefined)
+})
+
+test("image options survive template normalize and reject junk", () => {
+  const ok = normalizeTemplate({ name: "x", protocol: "image", imageSize: "3840x2160", imageOptions: { quality: "max", output_format: "gif", frame_count: 99, n: 2 } })
+  assert.equal(ok.imageSize, "3840x2160")
+  assert.deepEqual(ok.imageOptions, { quality: "max", output_format: "gif", n: 2 })
+  assert.equal(normalizeTemplate({ name: "x", imageOptions: { quality: "ultra" } }).imageOptions, undefined)
+})
+
+test("gpt-image-2 size hints", () => {
+  assert.equal(imageSizeHint("1536x864"), null)
+  assert.match(imageSizeHint("1000x1000") ?? "", /16/)
+  assert.match(imageSizeHint("3200x800") ?? "", /3:1/)
+  assert.match(imageSizeHint("3840x2160") ?? "", /实验/)
+  assert.equal(imageSizeHint("auto"), null)
+})
+
+test("gpt-image-2 builtin variants are image presets", () => {
+  for (const id of ["builtin:image-transparent", "builtin:image-wide", "builtin:image-gif", "builtin:image-svg"]) {
+    const t = tpl(id)
+    assert.equal(t.protocol, "image")
+    assert.ok(buildProbeRequest(t, buildProbePlan(t), "gpt-image-2", 1).image_options)
+  }
 })

@@ -888,6 +888,8 @@ export interface GatewayProbeRequest {
   protocol: "auto" | "chat" | "responses" | "image"
   /** 生图尺寸，如 1024x1024；仅 image 使用 */
   image_size?: string
+  /** gpt-image 系生图参数；仅 image 使用 */
+  image_options?: GatewayImageOptions
   rounds: GatewayProbeRound[]
   interval_sec: number
   max_tokens: number
@@ -895,6 +897,30 @@ export interface GatewayProbeRequest {
   reasoning: "default" | "off" | "low" | "medium" | "high"
   timeout_sec: number
   continue_on_error: boolean
+}
+
+export interface GatewayImageOptions {
+  quality?: "auto" | "low" | "medium" | "high" | "xhigh" | "max"
+  background?: "auto" | "opaque" | "transparent"
+  output_format?: "png" | "jpeg" | "webp" | "gif" | "svg"
+  output_compression?: number
+  n?: number
+  moderation?: "auto" | "low"
+  frame_count?: number
+  frame_duration_ms?: number
+}
+
+/** 上游回报的实际出图参数与用量（gpt-image 系） */
+export interface GatewayImageInfo {
+  size?: string
+  quality?: string
+  output_format?: string
+  background?: string
+  input_text_tokens?: number
+  input_image_tokens?: number
+  output_image_tokens?: number
+  output_text_tokens?: number
+  bytes?: number[]
 }
 
 export interface GatewayProbeSample {
@@ -919,6 +945,7 @@ export interface GatewayProbeSample {
   /** 生图返回的图片（URL 或 data URI）；超出回传上限的项为空串 */
   images?: string[]
   images_truncated?: boolean
+  image_info?: GatewayImageInfo
 }
 
 export interface GatewayProbeEvent {

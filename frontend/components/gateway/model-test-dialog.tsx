@@ -29,13 +29,15 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import type { GatewayModelListItem, GatewayModelTestResult, GatewayRoute } from "@/lib/api-types"
+import type { GatewayImageOptions, GatewayModelListItem, GatewayModelTestResult, GatewayRoute } from "@/lib/api-types"
 import { findSourceTest, modelSourceTests, resolveModelSources, type ModelSourceLabel } from "./gateway-utils"
 import {
+  IMAGE_SIZE_PATTERN,
   PROBE_LIMITS,
   REASONING_LABELS,
   VIEW_LABELS,
   buildProbePlan,
+  imageSizeHint,
   normalizeTemplate,
   type ProbeTemplate,
   type ProbeView,
@@ -55,6 +57,98 @@ import { MAX_CONCURRENCY, type ModelTests } from "./use-model-tests"
 
 const AVAILABILITY = "availability"
 const selectCls = "h-8 w-full rounded-md border bg-background px-2 text-xs"
+
+const IMAGE_SIZES: [string, string][] = [
+  ["", "1024x1024（默认）"],
+  ["auto", "auto"],
+  ["1024x1536", "竖版"],
+  ["1536x1024", "横版"],
+  ["2048x2048", "2K 方图"],
+  ["2560x1440", "2K 横幅"],
+  ["1440x2560", "2K 竖幅"],
+  ["3840x2160", "4K（实验性）"],
+  ["1536x864", "16:9"],
+  ["2304x768", "3:1 超宽"],
+  ["1792x1024", "dall-e-3"],
+  ["512x512", "dall-e-2"],
+]
+
+function ImageSizeField({ value, onChange }: { value?: string; onChange: (v: string | undefined) => void }) {
+  const [text, setText] = useState(value ?? "")
+  useEffect(() => setText(value ?? ""), [value])
+  const hint = imageSizeHint(text.trim())
+  const invalid = text.trim() !== "" && !IMAGE_SIZE_PATTERN.test(text.trim())
+  return (
+    <div className="space-y-1">
+      <Label htmlFor="pt-size" className="text-[11px] text-muted-foreground">图片尺寸（可自定义 宽x高）</Label>
+      <Input
+        id="pt-size"
+        list="pt-size-options"
+        className="h-8 text-xs"
+        placeholder="1024x1024"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          const t = text.trim().toLowerCase().replace(/[×*]/g, "x")
+          onChange(IMAGE_SIZE_PATTERN.test(t) ? t : undefined)
+          if (!IMAGE_SIZE_PATTERN.test(t)) setText("")
+        }}
+      />
+      <datalist id="pt-size-options">
+        {IMAGE_SIZES.filter(([v]) => v).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+      </datalist>
+      {invalid ? <p className="text-[10px] text-destructive">格式应为 1536x864 或 auto</p> : hint ? <p className="text-[10px] text-amber-600 dark:text-amber-400">{hint}</p> : null}
+    </div>
+  )
+}
+
+function ImageOptionsFields({ value, onChange }: { value: GatewayImageOptions; onChange: (v: GatewayImageOptions) => void }) {
+  const set = (patch: Partial<GatewayImageOptions>) => onChange({ ...value, ...patch })
+  const fmt = value.output_format
+  const sel = (id: string, label: string, v: string | undefined, opts: [string, string][], apply: (v: string) => void) => (
+    <div className="space-y-1">
+      <Label htmlFor={id} className="text-[11px] text-muted-foreground">{label}</Label>
+      <select id={id} className={selectCls} value={v ?? ""} onChange={(e) => apply(e.target.value)}>
+        {opts.map(([o, l]) => <option key={o} value={o}>{l}</option>)}
+      </select>
+    </div>
+  )
+  const num = (id: string, label: string, v: number | undefined, lo: number, hi: number, apply: (n: number | undefined) => void, placeholder: string) => (
+    <div className="space-y-1">
+      <Label htmlFor={id} className="text-[11px] text-muted-foreground">{label}</Label>
+      <Input
+        id={id}
+        type="number"
+        inputMode="numeric"
+        className="h-8 text-xs"
+        min={lo}
+        max={hi}
+        placeholder={placeholder}
+        value={v ?? ""}
+        onChange={(e) => {
+          const n = e.target.value === "" ? undefined : Math.round(Number(e.target.value))
+          apply(n == null || !Number.isFinite(n) ? undefined : Math.min(hi, Math.max(lo, n)))
+        }}
+      />
+    </div>
+  )
+  const transparentBlocked = fmt != null && fmt !== "png" && fmt !== "webp"
+  return (
+    <div className="space-y-2 rounded-md border border-dashed p-2">
+      <p className="text-[11px] text-muted-foreground">gpt-image 参数（留空 = 不发送，用上游默认；gpt-image 系质量默认 low 省钱）</p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {sel("pt-img-quality", "质量", value.quality, [["", "默认（low）"], ["auto", "auto"], ["low", "low"], ["medium", "medium"], ["high", "high"], ["xhigh", "xhigh（2.5+）"], ["max", "max（2.5+）"]], (v) => set({ quality: (v || undefined) as GatewayImageOptions["quality"] }))}
+        {sel("pt-img-format", "输出格式", fmt, [["", "默认（png）"], ["png", "PNG"], ["jpeg", "JPEG"], ["webp", "WebP"], ["gif", "GIF 动图（预览）"], ["svg", "SVG 矢量（预览）"]], (v) => set({ output_format: (v || undefined) as GatewayImageOptions["output_format"] }))}
+        {sel("pt-img-bg", "背景", value.background, [["", "默认"], ["auto", "auto"], ["opaque", "不透明"], ...(transparentBlocked ? [] : [["transparent", "透明"] as [string, string]])], (v) => set({ background: (v || undefined) as GatewayImageOptions["background"] }))}
+        {sel("pt-img-mod", "内容审核", value.moderation, [["", "默认"], ["auto", "auto"], ["low", "low（宽松）"]], (v) => set({ moderation: (v || undefined) as GatewayImageOptions["moderation"] }))}
+        {fmt === "svg" ? null : num("pt-img-n", "张数", value.n, 1, 10, (n) => set({ n }), "1")}
+        {fmt === "jpeg" || fmt === "webp" ? num("pt-img-comp", "压缩质量 0-100", value.output_compression, 0, 100, (n) => set({ output_compression: n }), "100") : null}
+        {fmt === "gif" ? num("pt-img-frames", "帧数 2-16", value.frame_count, 2, 16, (n) => set({ frame_count: n }), "9") : null}
+        {fmt === "gif" ? num("pt-img-dur", "每帧时长（ms）", value.frame_duration_ms, 20, 655350, (n) => set({ frame_duration_ms: n }), "200") : null}
+      </div>
+    </div>
+  )
+}
 
 function NumberField({ id, label, value, onChange, range, step, hint }: {
   id: string
@@ -155,18 +249,7 @@ function TemplateEditor({ draft, onChange }: { draft: ProbeTemplate; onChange: (
           </select>
         </div>
         {draft.protocol === "image" || draft.view === "image" ? (
-          <div className="space-y-1">
-            <Label htmlFor="pt-size" className="text-[11px] text-muted-foreground">图片尺寸</Label>
-            <select id="pt-size" className={selectCls} value={draft.imageSize ?? ""} onChange={(e) => onChange({ imageSize: e.target.value || undefined })}>
-              <option value="">1024x1024（默认）</option>
-              <option value="auto">auto</option>
-              <option value="1024x1536">1024x1536 竖版</option>
-              <option value="1536x1024">1536x1024 横版</option>
-              <option value="1792x1024">1792x1024（dall-e-3）</option>
-              <option value="512x512">512x512</option>
-              <option value="256x256">256x256（dall-e-2）</option>
-            </select>
-          </div>
+          <ImageSizeField value={draft.imageSize} onChange={(imageSize) => onChange({ imageSize })} />
         ) : null}
         <div className="space-y-1">
           <Label htmlFor="pt-reason" className="text-[11px] text-muted-foreground">推理强度</Label>
@@ -197,6 +280,9 @@ function TemplateEditor({ draft, onChange }: { draft: ProbeTemplate; onChange: (
           <NumberField id="pt-repeat" label="样本次数" value={draft.repeat} range={PROBE_LIMITS.repeat} onChange={(v) => onChange({ repeat: v })} />
         ) : null}
       </div>
+      {draft.protocol === "image" ? (
+        <ImageOptionsFields value={draft.imageOptions ?? {}} onChange={(imageOptions) => onChange({ imageOptions })} />
+      ) : null}
       <label className="flex items-center gap-2 text-xs">
         <Switch checked={draft.continueOnError} onCheckedChange={(v) => onChange({ continueOnError: v })} />
         某轮失败后继续后续轮次

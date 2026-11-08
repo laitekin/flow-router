@@ -53,13 +53,15 @@ type ModelProbeInput struct {
 	RouteID  uint   `json:"route_id"`
 	Protocol string `json:"protocol"` // auto | chat | responses | image（auto 下生图模型自动走 image）
 	// ImageSize 生图尺寸，如 1024x1024；为空用默认。仅 image 协议使用。
-	ImageSize   string       `json:"image_size"`
-	Rounds      []ProbeRound `json:"rounds"`
-	IntervalSec *int         `json:"interval_sec"` // pause before every round after the first
-	MaxTokens   int          `json:"max_tokens"`
-	Temperature *float64     `json:"temperature"`
-	Reasoning   string       `json:"reasoning"` // "" (provider default) | off | low | medium | high
-	TimeoutSec  int          `json:"timeout_sec"`
+	ImageSize string `json:"image_size"`
+	// ImageOptions gpt-image 系生图参数（质量 / 背景 / 格式 / 张数 / GIF 帧…）；仅 image 协议使用。
+	ImageOptions *ImageProbeOptions `json:"image_options,omitempty"`
+	Rounds       []ProbeRound       `json:"rounds"`
+	IntervalSec  *int               `json:"interval_sec"` // pause before every round after the first
+	MaxTokens    int                `json:"max_tokens"`
+	Temperature  *float64           `json:"temperature"`
+	Reasoning    string             `json:"reasoning"` // "" (provider default) | off | low | medium | high
+	TimeoutSec   int                `json:"timeout_sec"`
 	// ContinueOnError keeps running later rounds after a failure. Off by default
 	// so an unavailable upstream is not charged/hammered repeatedly.
 	ContinueOnError bool `json:"continue_on_error"`
@@ -85,8 +87,9 @@ type ModelProbeSample struct {
 	FinishReason    string   `json:"finish_reason,omitempty"`
 	Error           string   `json:"error,omitempty"`
 	// Images 生图轮次返回的图片（URL 或 data URI）；超出回传上限的项为空字符串。
-	Images          []string `json:"images,omitempty"`
-	ImagesTruncated bool     `json:"images_truncated,omitempty"`
+	Images          []string        `json:"images,omitempty"`
+	ImagesTruncated bool            `json:"images_truncated,omitempty"`
+	ImageInfo       *ImageProbeInfo `json:"image_info,omitempty"`
 }
 
 type ModelProbeEvent struct {
@@ -123,6 +126,9 @@ func normalizeProbeInput(in *ModelProbeInput) error {
 	in.ImageSize = strings.TrimSpace(in.ImageSize)
 	if in.ImageSize != "" && !probeImageSizePattern.MatchString(in.ImageSize) {
 		return errors.New("image_size must look like 1024x1024 or auto")
+	}
+	if err := in.ImageOptions.normalize(); err != nil {
+		return err
 	}
 	switch in.Reasoning {
 	case "", "default", "off", "low", "medium", "high":
@@ -270,7 +276,7 @@ func (a *AdminService) probeModel(parent context.Context, groupID uint, in Model
 		var sample ModelProbeSample
 		var path string
 		if imageMode {
-			body, err := imageProbeBody(upstreamModel, imagePromptFromMessages(round.Messages), in.ImageSize)
+			body, err := imageProbeBody(upstreamModel, imagePromptFromMessages(round.Messages), in.ImageSize, in.ImageOptions)
 			if err != nil {
 				return err
 			}
