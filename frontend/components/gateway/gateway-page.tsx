@@ -1510,7 +1510,7 @@ export function GatewayPage() {
     setCustomModel("")
   }
 
-  function openModelTest(m: GatewayModelListItem) {
+  function openModelTest(m: GatewayModelListItem | null) {
     setModelTestTarget(m)
     setModelTestOpen(true)
   }
@@ -1925,6 +1925,8 @@ export function GatewayPage() {
           }
         }}
         modelTestTarget={modelTestTarget}
+        groupID={selectedGroupID ?? undefined}
+        savedModels={modelItems}
         routeDrafts={routeDrafts}
         channelNameByID={channelNameByID}
         providerNameByID={providerNameByID}

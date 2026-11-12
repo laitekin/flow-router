@@ -135,6 +135,27 @@ func filterRoutesForModel(routes []storage.GatewayRoute, items []ModelListItem, 
 	return out
 }
 
+// adminTestRoutesForModel 是管理面模型测试使用的路由筛选。
+// 与转发一致地尊重已保存的路由绑定；唯一放宽：管理员显式指定单条路由测试
+// 一个尚未保存进分组目录的模型（如测试台里该路由上报但未同步的模型）时，
+// 允许直接打这条路由。公开 /v1/models 与转发仍走 filterRoutesForModel。
+func adminTestRoutesForModel(routes []storage.GatewayRoute, items []ModelListItem, model string, explicitRoute bool) []storage.GatewayRoute {
+	if explicitRoute && !catalogHasModel(items, model) {
+		return append([]storage.GatewayRoute(nil), routes...)
+	}
+	return filterRoutesForModel(routes, items, model)
+}
+
+func catalogHasModel(items []ModelListItem, model string) bool {
+	model = strings.TrimSpace(model)
+	for _, item := range items {
+		if strings.TrimSpace(item.ID) == model {
+			return true
+		}
+	}
+	return false
+}
+
 func routeAllowsModel(items []ModelListItem, routeID uint, model string) bool {
 	filtered := filterRoutesForModel([]storage.GatewayRoute{{ID: routeID}}, items, model)
 	return len(filtered) == 1 && filtered[0].ID == routeID

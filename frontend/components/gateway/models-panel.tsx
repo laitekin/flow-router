@@ -1,4 +1,4 @@
-import { DatabaseZap, Loader2, Plus, RefreshCw } from "lucide-react"
+import { DatabaseZap, FlaskConical, Loader2, Plus, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -89,7 +89,8 @@ type ModelsPanelProps = {
   isModelTesting: (model: string, routeID?: number) => boolean
   activeTestCount: number
   onRunModelTestFor: (modelID: string, routeID?: number) => void
-  onOpenModelTest: (m: GatewayModelListItem) => void
+  /** null opens the test bench with only the model picker */
+  onOpenModelTest: (m: GatewayModelListItem | null) => void
   mappingRows: MappingRow[]
   onMappingRowsChange: (rows: MappingRow[]) => void
   modelSuggestions: string[]
@@ -183,6 +184,14 @@ export function ModelsPanel({
         disabled={busy}
       >
         <DatabaseZap className="size-3.5" /> 同步官方模型目录
+      </Button>
+      <Button
+        className="h-9"
+        variant="outline"
+        onClick={() => onOpenModelTest(null)}
+        title="搜索并测试已保存的模型或各路由上报的模型"
+      >
+        <FlaskConical className="size-3.5" /> 模型测试台
       </Button>
     </div>
 
