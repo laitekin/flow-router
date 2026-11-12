@@ -52,7 +52,8 @@ import {
   sourceGroupOptionValue,
   sourceGroupSelectValue,
 } from "./gateway-utils"
-import { assignRouteTiers, tierLabel, tierTone } from "./route-tiers"
+import { assignRouteTiers } from "./route-tiers"
+import { TierBadge } from "./tier-badge"
 
 type ChannelOption = { id: number; name: string }
 
@@ -328,9 +329,9 @@ export function RoutesPanel({
       列表顺序 = 尝试顺序：按账号计费倍率
       {rateSort === "desc" ? "从高到低" : "从低到高"}
       排列。同倍率的路由是同一档（
-      <span className={cn("mx-0.5 rounded px-1 py-px text-[10px] font-semibold", tierTone(0).pill)}>主</span>
-      <span className={cn("mx-0.5 rounded px-1 py-px text-[10px] font-semibold", tierTone(1).pill)}>备1</span>
-      <span className={cn("mx-0.5 rounded px-1 py-px text-[10px] font-semibold", tierTone(2).pill)}>备2</span>
+      <TierBadge tier={0} bare className="mx-0.5 align-[-1px]" />→
+      <TierBadge tier={1} bare className="mx-0.5 align-[-1px]" />→
+      <TierBadge tier={2} bare className="mx-0.5 align-[-1px]" />
       …），档内按权重分流，整档失败 / 冷却才顺延到下一档。
       {rateResortEnabled
         ? "已在编辑组中开启「渠道分组价格倍率重排」：倍率扫描结束后会按源分组实时倍率自动重写顺序与计费倍率。"
@@ -390,12 +391,10 @@ export function RoutesPanel({
                 )}
               >
                 <TableCell className="text-center text-xs tabular-nums text-muted-foreground">
-                  <div className="flex flex-col items-center gap-0.5">
-                    <span
-                      className={cn(
-                        "rounded px-1 py-px text-[10px] leading-none font-semibold whitespace-nowrap",
-                        tierTone(tierEntry?.tier ?? -1).pill,
-                      )}
+                  <div className="flex flex-col items-center gap-1">
+                    <TierBadge
+                      tier={tierEntry?.tier ?? -1}
+                      inactiveLabel={tierEntry?.state === "paused" ? "冷却" : "停用"}
                       title={
                         tierEntry && tierEntry.tier >= 0
                           ? tierEntry.tierSize > 1
@@ -405,17 +404,11 @@ export function RoutesPanel({
                               : `备用第 ${tierEntry.tier} 档`
                           : "不参与调度"
                       }
-                    >
-                      {tierEntry && tierEntry.tier >= 0
-                        ? tierLabel(tierEntry.tier)
-                        : tierEntry?.state === "paused"
-                          ? "冷却"
-                          : "停用"}
-                    </span>
+                    />
                     {tierEntry && tierEntry.tierSize > 1 ? (
-                      <span className="text-[9px] text-muted-foreground">{Math.round(tierEntry.share * 100)}%</span>
+                      <span className="text-[10px] tabular-nums text-muted-foreground">{Math.round(tierEntry.share * 100)}%</span>
                     ) : (
-                      <span className="text-[9px] text-muted-foreground/70">{order + 1}</span>
+                      <span className="text-[10px] tabular-nums text-muted-foreground/60">{order + 1}</span>
                     )}
                   </div>
                 </TableCell>

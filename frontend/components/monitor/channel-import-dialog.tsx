@@ -176,7 +176,7 @@ export function ChannelImportDialog({ open, onOpenChange, onOpenAdvanced }: Chan
       <DialogContent className="grid-cols-1 sm:max-w-3xl [&>*]:min-w-0">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="size-4 text-brand" />
+            <Sparkles className="size-4 text-muted-foreground" />
             快速导入渠道
           </DialogTitle>
           <DialogDescription>
@@ -185,7 +185,7 @@ export function ChannelImportDialog({ open, onOpenChange, onOpenAdvanced }: Chan
         </DialogHeader>
 
         <div className="flex items-center justify-between gap-2">
-          <div className="inline-flex rounded-lg border border-border p-0.5" role="tablist">
+          <div className="inline-flex rounded-lg bg-muted p-0.5" role="tablist">
             {(
               [
                 ["single", "单个导入"],
@@ -199,8 +199,10 @@ export function ChannelImportDialog({ open, onOpenChange, onOpenAdvanced }: Chan
                 aria-selected={tab === key}
                 onClick={() => setTab(key)}
                 className={cn(
-                  "rounded-md px-3 py-1 text-xs font-medium transition-colors",
-                  tab === key ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground",
+                  "rounded-md px-3 py-1 text-xs font-medium transition-all",
+                  tab === key
+                    ? "bg-background text-foreground shadow-xs ring-1 ring-border/60"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 {label}
@@ -239,13 +241,15 @@ function Step({ n, title, done, children }: { n: number; title: string; done?: b
       <div className="flex items-center gap-2">
         <span
           className={cn(
-            "flex size-5 items-center justify-center rounded-full text-[11px] font-semibold",
-            done ? "bg-emerald-600 text-white" : "bg-muted text-muted-foreground",
+            "flex size-5 items-center justify-center rounded-full border text-[10px] font-medium tabular-nums",
+            done
+              ? "border-emerald-600/30 bg-emerald-500/10 text-emerald-700/90 dark:text-emerald-400/80"
+              : "border-border bg-background text-muted-foreground",
           )}
         >
           {done ? <Check className="size-3" /> : n}
         </span>
-        <h3 className="text-sm font-medium">{title}</h3>
+        <h3 className="text-[13px] font-medium text-foreground">{title}</h3>
       </div>
       <div className="min-w-0 pl-7">{children}</div>
     </section>
@@ -405,17 +409,17 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
             {site ? (
               <>
-                <span className="rounded-md border border-border bg-muted/50 px-1.5 py-0.5 font-medium">{TYPE_LABEL[site.type]}</span>
+                <span className="rounded-md border border-border bg-background px-1.5 py-0.5 font-medium text-foreground/85">{TYPE_LABEL[site.type]}</span>
                 {site.site_name ? <span className="text-muted-foreground">{site.site_name}</span> : null}
                 <span className="text-muted-foreground">{siteURL}</span>
                 {site.turnstile_enabled ? (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
-                    <ShieldCheck className="size-3" />
+                  <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-foreground/80">
+                    <ShieldCheck className="size-3 text-amber-600/80 dark:text-amber-400/80" />
                     开启了 Turnstile 人机验证
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
-                    <Check className="size-3" />
+                  <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-foreground/80">
+                    <Check className="size-3 text-emerald-600/80 dark:text-emerald-400/80" />
                     无人机验证
                   </span>
                 )}
@@ -424,7 +428,7 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
                 ) : null}
               </>
             ) : (
-              <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400">
+              <span className="inline-flex items-center gap-1 text-amber-700/90 dark:text-amber-400/80">
                 <AlertTriangle className="size-3" />
                 {detect.error || "无法自动识别"}，请手动选择类型：
               </span>
@@ -436,8 +440,10 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
                   type="button"
                   onClick={() => setTypeOverride(t === site?.type ? undefined : t)}
                   className={cn(
-                    "rounded-md border px-1.5 py-0.5",
-                    type === t ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground",
+                    "rounded-md border px-1.5 py-0.5 transition-colors",
+                    type === t
+                      ? "border-foreground/25 bg-muted text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
                   )}
                 >
                   {TYPE_LABEL[t]}
@@ -449,20 +455,22 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
       </Step>
 
       <Step n={2} title="登录方式" done={!!preview}>
-        <div className="grid grid-cols-3 gap-1.5 rounded-lg border border-border p-1">
+        <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-muted p-0.5">
           {methodTabs.map(({ key, label, icon: Icon, hint }) => (
             <button
               key={key}
               type="button"
               onClick={() => setMethod(key)}
               className={cn(
-                "flex flex-col items-center gap-0.5 rounded-md px-2 py-1.5 text-xs transition-colors sm:flex-row sm:justify-center sm:gap-1.5",
-                method === key ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+                "flex flex-col items-center gap-0.5 rounded-md px-2 py-1.5 text-xs transition-all sm:flex-row sm:justify-center sm:gap-1.5",
+                method === key
+                  ? "bg-background text-foreground shadow-xs ring-1 ring-border/60"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
-              <Icon className="size-3.5" />
+              <Icon className={cn("size-3.5", method === key ? "text-foreground/70" : "")} />
               <span className="font-medium">{label}</span>
-              <span className={cn("text-[10px]", method === key ? "opacity-70" : "opacity-60")}>{hint}</span>
+              <span className="text-[10px] text-muted-foreground">{hint}</span>
             </button>
           ))}
         </div>
@@ -501,7 +509,7 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
                 </div>
               </div>
               {site && !site.password_login_enabled ? (
-                <p className="text-[11px] text-amber-700 dark:text-amber-400">该站点关闭了密码登录，请用「浏览器导入」。</p>
+                <p className="text-[11px] text-amber-700/90 dark:text-amber-400/80">该站点关闭了密码登录，请用「浏览器导入」。</p>
               ) : null}
               <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
                 <div>
@@ -551,7 +559,8 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
       </Step>
 
       {error ? (
-        <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
+        <p className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-foreground/85" role="alert">
+          <AlertTriangle className="mt-px size-3.5 shrink-0 text-rose-500/80" />
           {error}
         </p>
       ) : null}
@@ -589,7 +598,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
   return (
     <div className="rounded-lg border border-border px-3 py-2" title={hint}>
       <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className={cn("font-mono text-sm font-semibold tabular-nums", hint && "text-amber-700 dark:text-amber-400")}>{hint ? "获取失败" : value}</p>
+      <p className={cn("font-mono text-sm font-semibold tabular-nums", hint && "text-amber-700/90 dark:text-amber-400/80")}>{hint ? "获取失败" : value}</p>
     </div>
   )
 }
@@ -652,7 +661,7 @@ function BrowserImportPanel({
               </Button>
             </div>
             {type === "newapi" ? (
-              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+              <p className="text-[11px] text-amber-700/90 dark:text-amber-400/80">
                 NewAPI 会重新生成「系统访问令牌」，旧的系统访问令牌（如有）会失效；API 密钥不受影响。
               </p>
             ) : null}
@@ -670,7 +679,7 @@ function BrowserImportPanel({
               className="field-sizing-fixed font-mono text-[11px] break-all"
             />
             {parsed ? (
-              <p className="inline-flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-400">
+              <p className="inline-flex items-center gap-1 text-[11px] text-emerald-700/90 dark:text-emerald-400/80">
                 <Check className="size-3" />
                 已识别 {parsed.type ? TYPE_LABEL[parsed.type] : ""} 凭据{parsed.username ? ` · ${parsed.username}` : ""}
                 {parsed.refresh_token ? " · 含 refresh_token（可自动续期）" : ""}
@@ -829,10 +838,10 @@ function BatchImport({ active }: { active: boolean }) {
 
   const statusTone: Record<RowStatus, string> = {
     pending: "text-muted-foreground",
-    working: "text-sky-700 dark:text-sky-300",
-    ready: "text-emerald-700 dark:text-emerald-400",
-    error: "text-destructive",
-    saved: "text-emerald-700 dark:text-emerald-400",
+    working: "text-muted-foreground",
+    ready: "text-emerald-700/90 dark:text-emerald-400/80",
+    error: "text-rose-600/90 dark:text-rose-400/80",
+    saved: "text-emerald-700/90 dark:text-emerald-400/80",
   }
 
   const openPreview = useMemo(() => rows.find((r) => r.key === openRow)?.preview ?? null, [rows, openRow])
@@ -872,7 +881,7 @@ function BatchImport({ active }: { active: boolean }) {
                 <li key={r.key} className="flex items-center gap-2 px-3 py-2 text-xs">
                   <span className="w-14 shrink-0">
                     {r.type ? (
-                      <span className="rounded border border-border bg-muted/50 px-1 py-0.5 text-[10px]">{TYPE_LABEL[r.type]}</span>
+                      <span className="rounded border border-border px-1 py-0.5 text-[10px] text-muted-foreground">{TYPE_LABEL[r.type]}</span>
                     ) : (
                       <span className="text-[10px] text-muted-foreground">待识别</span>
                     )}
@@ -880,7 +889,7 @@ function BatchImport({ active }: { active: boolean }) {
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">
                       {r.siteName || hostOf(r.draft.site_url)}
-                      {r.turnstile ? <ShieldCheck className="ml-1 inline size-3 text-amber-600" aria-label="Turnstile" /> : null}
+                      {r.turnstile ? <ShieldCheck className="ml-1 inline size-3 text-muted-foreground" aria-label="Turnstile" /> : null}
                     </p>
                     <p className="truncate text-[11px] text-muted-foreground">
                       {r.draft.credential_mode === "token" ? "Token" : r.draft.username || "（无账号）"}

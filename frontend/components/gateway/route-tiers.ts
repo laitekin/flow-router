@@ -67,33 +67,19 @@ export function tierLabel(tier: number): string {
   return tier === 0 ? "主" : `备${tier}`
 }
 
-/** 每档的配色：主 = 绿，备1 = 蓝，备2 = 紫，备3+ = 灰蓝。 */
-export function tierTone(tier: number): { pill: string; chip: string } {
+/**
+ * 每档的强调色：只用在小号「信号格」图标上，表面保持中性（Linear 风格）。
+ * 主 = 柔和绿，备1 = 柔和蓝，备2 = 柔和紫，更后 = 灰。
+ */
+export function tierAccent(tier: number): string {
   switch (tier) {
     case 0:
-      return {
-        pill: "bg-emerald-600 text-white dark:bg-emerald-500 dark:text-emerald-950",
-        chip: "border-emerald-300 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-950/40",
-      }
+      return "bg-emerald-500/85 dark:bg-emerald-400/80"
     case 1:
-      return {
-        pill: "bg-sky-600 text-white dark:bg-sky-500 dark:text-sky-950",
-        chip: "border-sky-300 bg-sky-50/80 dark:border-sky-800 dark:bg-sky-950/40",
-      }
+      return "bg-sky-500/75 dark:bg-sky-400/70"
     case 2:
-      return {
-        pill: "bg-violet-600 text-white dark:bg-violet-500 dark:text-violet-950",
-        chip: "border-violet-300 bg-violet-50/80 dark:border-violet-800 dark:bg-violet-950/40",
-      }
-    case -1:
-      return {
-        pill: "bg-muted-foreground/30 text-muted-foreground",
-        chip: "border-dashed border-border bg-muted/30 opacity-70",
-      }
+      return "bg-violet-400/80 dark:bg-violet-400/70"
     default:
-      return {
-        pill: "bg-slate-500 text-white dark:bg-slate-400 dark:text-slate-950",
-        chip: "border-slate-300 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/40",
-      }
+      return "bg-zinc-400/80 dark:bg-zinc-500"
   }
 }

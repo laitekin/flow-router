@@ -28,7 +28,7 @@ import {
   formatSchedulerRate,
   type SchedulerRouteRow,
 } from "./scheduler-view-utils"
-import { tierLabel, tierTone } from "./route-tiers"
+import { TierBadge } from "./tier-badge"
 
 type SchedulerWorkbenchProps = {
   group: GatewayGroup | null
@@ -37,78 +37,53 @@ type SchedulerWorkbenchProps = {
   providers: GatewayProviderOption[]
 }
 
+const NEUTRAL_BADGE = "border-border bg-background text-foreground/80"
+
 function stateMeta(state: SchedulerRouteRow["state"], tier = -1) {
   switch (state) {
     case "primary":
-      return {
-        label: "主",
-        className:
-          "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300",
-        icon: Check,
-      }
+      return { label: "主", className: NEUTRAL_BADGE, iconClassName: "text-emerald-600/80 dark:text-emerald-400/80", icon: Check }
     case "fallback":
       return {
-        label: tier > 0 ? tierLabel(tier) : "备用",
-        className:
-          tier === 2
-            ? "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/60 dark:bg-violet-950/40 dark:text-violet-300"
-            : tier > 2
-              ? "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300"
-              : "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300",
+        label: tier > 0 ? `备${tier}` : "备用",
+        className: NEUTRAL_BADGE,
+        iconClassName: "text-muted-foreground",
         icon: ArrowRight,
       }
     case "paused":
-      return {
-        label: "暂停",
-        className:
-          "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300",
-        icon: Pause,
-      }
+      return { label: "暂停", className: NEUTRAL_BADGE, iconClassName: "text-amber-600/80 dark:text-amber-400/80", icon: Pause }
     case "disabled":
-      return {
-        label: "禁用",
-        className:
-          "border-border bg-muted/60 text-muted-foreground",
-        icon: CircleOff,
-      }
+      return { label: "禁用", className: "border-border bg-muted/40 text-muted-foreground", iconClassName: "", icon: CircleOff }
     default:
-      return {
-        label: "不可调度",
-        className:
-          "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300",
-        icon: X,
-      }
+      return { label: "不可调度", className: NEUTRAL_BADGE, iconClassName: "text-rose-600/80 dark:text-rose-400/80", icon: X }
   }
 }
 
 function RouteChainItem({ row }: { row: SchedulerRouteRow }) {
-  const tone = tierTone(row.tier)
   return (
-    <div className={`min-w-0 rounded-xl border p-3 shadow-xs ${tone.chip}`}>
-      <div className="flex items-start gap-2">
-        <div className={`flex h-7 min-w-7 shrink-0 items-center justify-center rounded-lg px-1.5 text-xs font-semibold ${tone.pill}`}>
-          {tierLabel(row.tier)}
-        </div>
-        <div className="min-w-0 flex-1">
+    <div className="min-w-0 rounded-lg border border-border bg-background p-3 transition-colors hover:border-foreground/15">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
           <p className="truncate text-sm font-medium text-foreground">{row.sourceLabel}</p>
           <p className="truncate text-[11px] text-muted-foreground">
             路由 #{row.route.id ?? "—"} · {row.protocolLabel}
           </p>
         </div>
+        <TierBadge tier={row.tier} />
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/70 pt-2.5 text-[11px]">
         <div>
           <p className="text-muted-foreground">有效倍率</p>
-          <p className="mt-0.5 font-mono font-medium">{formatSchedulerRate(row.rate)}</p>
+          <p className="mt-0.5 font-mono tabular-nums text-foreground/90">{formatSchedulerRate(row.rate)}</p>
         </div>
         <div>
           <p className="text-muted-foreground">权重</p>
-          <p className="mt-0.5 font-mono font-medium">{row.weight}</p>
+          <p className="mt-0.5 font-mono tabular-nums text-foreground/90">{row.weight}</p>
         </div>
         <div>
           <p className="text-muted-foreground">{row.tierSize > 1 ? "同档分流" : "流量"}</p>
-          <p className="mt-0.5 font-mono font-medium">
-            {row.tier === 0 ? formatSchedulerPercent(row.configuredShare) : row.tierSize > 1 ? formatSchedulerPercent(row.configuredShare) : "失败才用"}
+          <p className="mt-0.5 font-mono tabular-nums text-foreground/90">
+            {row.tier === 0 || row.tierSize > 1 ? formatSchedulerPercent(row.configuredShare) : "失败才用"}
           </p>
         </div>
       </div>
@@ -214,10 +189,16 @@ export function SchedulerWorkbench({
           ["禁用", snapshot.disabledCount, "muted"],
           ["配置路由", snapshot.rows.length, "sky"],
         ].map(([label, value, tone]) => (
-          <div key={label} className="rounded-xl border border-border bg-background px-4 py-3 shadow-xs">
+          <div key={label} className="rounded-lg border border-border bg-background px-4 py-3">
             <p className="text-xs text-muted-foreground">{label}</p>
-            <p className={`mt-1 text-xl font-semibold ${tone === "emerald" ? "text-emerald-600 dark:text-emerald-400" : tone === "amber" ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
+            <p className="mt-1 flex items-center gap-2 text-xl font-semibold tabular-nums text-foreground">
               {value}
+              {tone === "emerald" || tone === "amber" ? (
+                <span
+                  className={`size-1.5 rounded-full ${tone === "emerald" ? "bg-emerald-500/80" : Number(value) > 0 ? "bg-amber-500/80" : "bg-muted-foreground/30"}`}
+                  aria-hidden
+                />
+              ) : null}
             </p>
           </div>
         ))}
@@ -254,7 +235,7 @@ export function SchedulerWorkbench({
                     ) : null}
                   </div>
                   {index < tiers.length - 1 ? (
-                    <ArrowRight className="hidden size-4 shrink-0 text-muted-foreground lg:block" aria-label="全部失败后顺延" />
+                    <ArrowRight className="hidden size-3.5 shrink-0 text-muted-foreground/50 lg:block" aria-label="全部失败后顺延" />
                   ) : null}
                 </div>
               ))}
@@ -309,9 +290,7 @@ export function SchedulerWorkbench({
                   <tr key={row.route.id ?? row.index} className="align-middle">
                     <td className="px-4 py-3 sm:px-5">
                       {row.tier >= 0 ? (
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${tierTone(row.tier).pill}`}>
-                          {tierLabel(row.tier)}
-                        </span>
+                        <TierBadge tier={row.tier} />
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
@@ -325,11 +304,9 @@ export function SchedulerWorkbench({
                     <td className="px-3 py-3 font-mono">{formatSchedulerRate(row.rate)}</td>
                     <td className="w-[145px] px-3 py-3">
                       <div className="flex items-center gap-2">
-                        <Progress value={row.configuredShare * 100} className="h-1.5" />
-                        <span className="w-8 shrink-0 text-right font-mono text-[11px]">
-                          {row.state === "primary" || row.state === "fallback"
-                            ? formatSchedulerPercent(row.configuredShare)
-                            : "—"}
+                        <Progress value={row.tierSize > 1 ? row.configuredShare * 100 : 0} className="h-1" />
+                        <span className="w-8 shrink-0 text-right font-mono text-[11px] text-muted-foreground tabular-nums">
+                          {row.tierSize > 1 ? formatSchedulerPercent(row.configuredShare) : "—"}
                         </span>
                       </div>
                     </td>
@@ -339,7 +316,7 @@ export function SchedulerWorkbench({
                     </td>
                     <td className="px-3 py-3">
                       <Badge variant="outline" className={`gap-1 text-[10px] ${meta.className}`}>
-                        <StateIcon className="size-3" /> {meta.label}
+                        <StateIcon className={`size-3 ${meta.iconClassName}`} /> {meta.label}
                       </Badge>
                     </td>
                     <td className="max-w-[180px] truncate px-4 py-3 text-muted-foreground sm:px-5">
