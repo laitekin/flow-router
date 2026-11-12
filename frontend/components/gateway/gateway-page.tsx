@@ -109,11 +109,13 @@ import {
   type PriceFormState,
   describeProbeFailure,
 } from "./gateway-utils"
+import { QuickSetupDialog, type QuickSetupOptions, type QuickSetupStep, type QuickSetupStepState } from "./quick-setup-dialog"
 
 export function GatewayPage() {
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [searchParams] = useSearchParams()
   const channels = useChannels()
+  const [quickSetupOpen, setQuickSetupOpen] = useState(false)
   const channelList = channels.data ?? []
 
   const [groups, setGroups] = useState<GatewayGroup[]>([])
@@ -929,7 +931,8 @@ export function GatewayPage() {
           }),
         })
         setSelectedGroupID(g.id)
-        toast.success("已创建网关组")
+        toast.success("已创建网关组，勾选渠道分组即可完成配置")
+        setQuickSetupOpen(true)
       }
       setGroupDialogOpen(false)
       await loadGroups()
@@ -1143,13 +1146,13 @@ export function GatewayPage() {
     }
   }
 
-  async function saveRoutes() {
-    if (!selectedGroup) return
+  async function saveRoutes(drafts: Partial<GatewayRoute>[] = routeDrafts, quiet = false): Promise<GatewayRoute[] | null> {
+    if (!selectedGroup) return null
     setBusy(true)
     try {
       // 按当前倍率排序后提交，与同步账号 / 运行时尝试顺序一致
       const ordered = sortGatewayRouteRows(
-        routeDrafts,
+        drafts,
         sourceGroupsByChannel,
         providerOptions,
         rateSort,
@@ -1231,6 +1234,7 @@ export function GatewayPage() {
         { method: "PUT", body: JSON.stringify({ routes }) },
       )
       setRouteDrafts((res.items ?? []).map((r) => ({ ...r })))
+      if (quiet) return res.items ?? []
       toast.success("路由已保存")
       const missing = (res.items ?? []).some(
         (r) => routeSourceKind(r) === "monitor" && !r.source_api_key_name,
@@ -1238,15 +1242,66 @@ export function GatewayPage() {
       if (missing) {
         toast.message("部分路由尚未确保上游密钥，可点击「确保上游密钥」")
       }
+      return res.items ?? []
     } catch (e) {
+      if (quiet) throw e
       toast.error(e instanceof Error ? e.message : "保存失败")
+      return null
     } finally {
       setBusy(false)
     }
   }
 
-  async function ensureKeys() {
-    if (!selectedGroup) return
+  /** 快速配置：保存路由 → 上游建密钥 → 同步模型，逐步回报进度。 */
+  async function runQuickSetup(
+    newRoutes: Partial<GatewayRoute>[],
+    opts: QuickSetupOptions,
+    onStep: (step: QuickSetupStep, s: QuickSetupStepState) => void,
+  ) {
+    const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
+    onStep("routes", { state: "running" })
+    try {
+      const items = await saveRoutes([...routeDrafts, ...newRoutes], true)
+      onStep("routes", { state: "ok", detail: `新增 ${newRoutes.length} 条，共 ${items?.length ?? 0} 条路由，已按倍率排好主备` })
+      const newChannelIDs = new Set(newRoutes.map((r) => Number(r.source_channel_id) || 0).filter((id) => id > 0))
+      for (const id of newChannelIDs) void loadSourceGroups(id)
+    } catch (e) {
+      onStep("routes", { state: "error", detail: errMsg(e) })
+      return
+    }
+    if (opts.ensureKeys) {
+      onStep("keys", { state: "running" })
+      try {
+        const res = await ensureKeys(true)
+        const fails = (res?.routes ?? []).filter((r) => !r.ok && !r.skipped)
+        onStep("keys", {
+          state: (res?.fail_count ?? 0) > 0 ? "error" : "ok",
+          detail: [
+            `成功 ${res?.ok_count ?? 0}`,
+            (res?.skip_count ?? 0) > 0 ? `已有 ${res?.skip_count}` : "",
+            (res?.fail_count ?? 0) > 0 ? `失败 ${res?.fail_count}：${fails.map((f) => `${f.label}${f.error ? ` ${f.error}` : ""}`).slice(0, 2).join("；")}` : "",
+          ].filter(Boolean).join(" · "),
+        })
+      } catch (e) {
+        onStep("keys", { state: "error", detail: errMsg(e) })
+      }
+    }
+    if (opts.syncModels) {
+      onStep("models", { state: "running" })
+      try {
+        const res = await syncModels(true)
+        onStep("models", {
+          state: (res?.fail_count ?? 0) > 0 && (res?.model_count ?? 0) === 0 ? "error" : "ok",
+          detail: `${res?.model_count ?? 0} 个模型${(res?.fail_count ?? 0) > 0 ? ` · ${res?.fail_count} 条路由拉取失败（通常是密钥还没建好）` : ""}`,
+        })
+      } catch (e) {
+        onStep("models", { state: "error", detail: errMsg(e) })
+      }
+    }
+  }
+
+  async function ensureKeys(quiet = false): Promise<GatewayEnsureKeysResult | null> {
+    if (!selectedGroup) return null
     setBusy(true)
     try {
       const res = await apiFetch<GatewayEnsureKeysResult>(
@@ -1254,6 +1309,7 @@ export function GatewayPage() {
         { method: "POST" },
       )
       setRouteDrafts((res.items ?? []).map((r) => ({ ...r })))
+      if (quiet) return res
       setEnsureKeysResult(res)
       setEnsureKeysOpen(true)
       const parts = [`成功 ${res.ok_count ?? 0}`]
@@ -1266,8 +1322,11 @@ export function GatewayPage() {
       } else {
         toast.success(parts.join(" · "))
       }
+      return res
     } catch (e) {
+      if (quiet) throw e
       toast.error(e instanceof Error ? e.message : "确保密钥失败")
+      return null
     } finally {
       setBusy(false)
     }
@@ -1395,8 +1454,8 @@ export function GatewayPage() {
     setPriceDialogOpen(true)
   }
 
-  async function syncModels() {
-    if (!selectedGroup) return
+  async function syncModels(quiet = false): Promise<GatewayModelSyncResult | null> {
+    if (!selectedGroup) return null
     setBusy(true)
     // 未点「保存」的自定义模型也要带上，避免同步结果覆盖后丢失
     const localCustom = modelItems
@@ -1431,6 +1490,10 @@ export function GatewayPage() {
       }
       setModelItems(merged)
       if (pendingID) setCustomModel("")
+      if (quiet) {
+        await loadGroups()
+        return res
+      }
       setModelSyncResult(res)
       setModelSyncOpen(true)
       const parts = [
@@ -1450,8 +1513,11 @@ export function GatewayPage() {
         toast.success(parts.join(" · "))
       }
       await loadGroups()
+      return res
     } catch (e) {
+      if (quiet) throw e
       toast.error(e instanceof Error ? e.message : "同步失败")
+      return null
     } finally {
       setBusy(false)
     }
@@ -1601,6 +1667,16 @@ export function GatewayPage() {
   return (
     <section className="space-y-4">
       {confirmDialog}
+      <QuickSetupDialog
+        open={quickSetupOpen && !!selectedGroup}
+        onOpenChange={setQuickSetupOpen}
+        groupName={selectedGroup?.name ?? ""}
+        channels={channelList}
+        providers={providerOptions}
+        existingRoutes={routeDrafts}
+        rateSort={rateSort}
+        onApply={runQuickSetup}
+      />
 
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
@@ -1788,6 +1864,7 @@ export function GatewayPage() {
                         onLoadProviderOptions={() => void loadProviderOptions()}
                         onSaveRoutes={() => void saveRoutes()}
                         onEnsureKeys={() => void ensureKeys()}
+                        onQuickSetup={() => setQuickSetupOpen(true)}
                         onClearRoutePause={(id) => void clearRoutePause(id)}
                         onShowPauseError={setPauseErrorRoute}
                         routeCooldowns={routeCooldowns}

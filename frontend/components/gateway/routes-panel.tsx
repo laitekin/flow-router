@@ -1,5 +1,5 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react"
-import { Check, ChevronDown, Loader2, Play, Plus, Trash2 } from "lucide-react"
+import { Check, ChevronDown, Loader2, Play, Plus, Trash2, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -210,6 +210,8 @@ type RoutesPanelProps = {
   onLoadProviderOptions: () => void
   onSaveRoutes: () => void
   onEnsureKeys: () => void
+  /** 打开「快速配置」向导 */
+  onQuickSetup?: () => void
   onClearRoutePause: (routeID?: number) => void
   onShowPauseError: (route: Partial<GatewayRoute>) => void
   /** 各路由仍生效的冷却（key 为路由 id） */
@@ -238,6 +240,7 @@ export function RoutesPanel({
   onLoadProviderOptions,
   onSaveRoutes,
   onEnsureKeys,
+  onQuickSetup,
   onClearRoutePause,
   onShowPauseError,
   routeCooldowns,
@@ -299,13 +302,18 @@ export function RoutesPanel({
         </Button>
       </div>
       <div className="flex-1" />
+      {onQuickSetup ? (
+        <Button size="sm" className="h-9" onClick={onQuickSetup} disabled={busy}>
+          <Zap className="size-3.5" /> 快速配置
+        </Button>
+      ) : null}
       <Button
         size="sm"
         variant="outline"
         className="h-9"
         onClick={() => setRouteDrafts([...routeDrafts, emptyRoute()])}
       >
-        <Plus className="size-3.5" /> 添加路由
+        <Plus className="size-3.5" /> 手动添加
       </Button>
       <Button
         size="sm"
@@ -876,8 +884,16 @@ export function RoutesPanel({
           })}
           {routeDrafts.length === 0 && (
             <TableRow>
-              <TableCell colSpan={13} className="text-center text-muted-foreground">
-                添加路由后保存。监控渠道需「确保上游密钥」；直连渠道使用已配置的 Key
+              <TableCell colSpan={13} className="py-10 text-center">
+                <p className="text-sm text-foreground">还没有路由</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  用「快速配置」勾选渠道分组，一键完成路由、上游密钥和模型同步
+                </p>
+                {onQuickSetup ? (
+                  <Button size="sm" className="mt-3" onClick={onQuickSetup}>
+                    <Zap className="size-3.5" /> 快速配置
+                  </Button>
+                ) : null}
               </TableCell>
             </TableRow>
           )}

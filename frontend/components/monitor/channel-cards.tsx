@@ -1,10 +1,8 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
-  ArrowUpDown,
-  ArrowRightLeft,
   CheckCircle2,
   ChevronDown,
   CreditCard,
@@ -19,7 +17,6 @@ import {
   Play,
   Plus,
   RefreshCw,
-  Search,
   Tags,
   Trash2,
   Gift,
@@ -48,10 +45,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useConfirm } from "@/components/ui/confirm-dialog"
 import { useBalanceAlerts, useChannels, useChannelsPage, useChannelRates } from "@/lib/queries"
 import { BalanceAlertActions, RunwayValue, balanceAlertKey, indexBalanceAlerts } from "./balance-runway"
@@ -60,9 +53,10 @@ import { useTriggerRefresh } from "@/lib/refresh-context"
 import { channelTypeLabel, decimal, formatRatio, money, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { syncAllChannelsStream, syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
-import type { Channel, ChannelRedeemResult, RateSnapshot } from "@/lib/api-types"
+import type { Channel, ChannelRedeemResult } from "@/lib/api-types"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
 import { ChannelCatalogDialog } from "@/components/monitor/channel-catalog-dialog"
+import { ChannelGroupsDialog } from "@/components/monitor/channel-groups-dialog"
 import { useAddChannel } from "@/lib/add-channel-context"
 import { ChannelRedeemDialog } from "@/components/monitor/channel-redeem-dialog"
 import { ChannelRechargeDialog } from "@/components/monitor/channel-recharge-dialog"
@@ -76,7 +70,6 @@ import {
 
 type Status = "healthy" | "low" | "failed" | "idle"
 type ChannelPageSize = 9 | 18 | 36 | 72 | 81 | "all"
-type GroupSortMode = "channel-asc" | "channel-desc" | "ratio-asc" | "ratio-desc"
 
 const channelPageSizeOptions: ChannelPageSize[] = [9, 18, 36, 72, 81, "all"]
 
@@ -227,248 +220,9 @@ function InlineRates({ channel }: { channel: Channel }) {
   )
 }
 
-interface ChannelGroupRow {
-  key: string
-  channel: Channel
-  rate: RateSnapshot
-}
-
 interface ChannelAPIKeyDialogState {
   channel: Channel
   initialAction?: ChannelAPIKeyInitialAction
-}
-
-function ChannelGroupsDialog({
-  open,
-  onOpenChange,
-  channels,
-  onAPIKeyAction,
-  nestedDialogOpen,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  channels: Channel[]
-  onAPIKeyAction: (channel: Channel, rate: RateSnapshot, type: "create" | "migrate") => void
-  nestedDialogOpen: boolean
-}) {
-  const [query, setQuery] = useState("")
-  const [sortMode, setSortMode] = useState<GroupSortMode>("channel-asc")
-  const [rows, setRows] = useState<ChannelGroupRow[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [dialogContentElement, setDialogContentElement] = useState<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-
-    Promise.all(
-      channels.map(async (channel) => {
-        const rates = await apiFetch<RateSnapshot[]>(
-          `/channels/${channel.id}/rates${channel.only_created_key_groups_enabled ? "?only_with_keys=1" : ""}`,
-        )
-        return { channel, rates }
-      }),
-    )
-      .then((result) => {
-        if (cancelled) return
-        setRows(
-          result.flatMap(({ channel, rates }) =>
-            rates.map((rate) => ({
-              key: `${channel.id}-${rate.id}`,
-              channel,
-              rate,
-            })),
-          ),
-        )
-      })
-      .catch((e: Error) => {
-        if (!cancelled) setError(e.message || "加载分组失败")
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [open, channels])
-
-  const filteredRows = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return rows
-      .filter(({ channel, rate }) => {
-        if (!q) return true
-        return [
-          channel.name,
-          channelTypeLabel(channel.type),
-          rate.model_name,
-          rate.description ?? "",
-          formatRatio(rate.ratio),
-        ].some((value) => value.toLowerCase().includes(q))
-      })
-      .sort((a, b) => {
-        if (sortMode === "ratio-asc" || sortMode === "ratio-desc") {
-          const diff = a.rate.ratio - b.rate.ratio
-          return sortMode === "ratio-asc" ? diff : -diff
-        }
-        const diff = a.channel.name.localeCompare(b.channel.name, "zh-CN")
-          || a.rate.model_name.localeCompare(b.rate.model_name, "zh-CN")
-        return sortMode === "channel-asc" ? diff : -diff
-      })
-  }, [query, rows, sortMode])
-
-  const channelCount = new Set(rows.map((row) => row.channel.id)).size
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        ref={setDialogContentElement}
-        className="sm:max-w-4xl"
-        onInteractOutside={(event) => {
-          if (nestedDialogOpen) event.preventDefault()
-        }}
-        onEscapeKeyDown={(event) => {
-          if (nestedDialogOpen) event.preventDefault()
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle className="text-base font-medium">{"分组"}</DialogTitle>
-          <DialogDescription className="text-xs">
-            {loading ? "正在加载全部渠道分组" : `${rows.length} 个分组 · ${channelCount} 个渠道`}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索渠道、分组或倍率"
-              className="h-9 pl-8 text-xs"
-            />
-          </div>
-          <Select value={sortMode} onValueChange={(value) => setSortMode(value as GroupSortMode)}>
-            <SelectTrigger className="h-9 w-full gap-2 text-xs sm:w-40">
-              <ArrowUpDown className="size-4 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectItem value="channel-asc">{"渠道 A-Z"}</SelectItem>
-              <SelectItem value="channel-desc">{"渠道 Z-A"}</SelectItem>
-              <SelectItem value="ratio-asc">{"倍率从低到高"}</SelectItem>
-              <SelectItem value="ratio-desc">{"倍率从高到低"}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <ScrollArea className="h-[60vh] rounded-md border">
-          <Table className="text-xs">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="h-9 font-medium text-muted-foreground">{"渠道"}</TableHead>
-                <TableHead className="hidden h-9 font-medium text-muted-foreground sm:table-cell">{"类型"}</TableHead>
-                <TableHead className="h-9 font-medium text-muted-foreground">{"分组"}</TableHead>
-                <TableHead className="h-9 text-right font-medium text-muted-foreground">{"倍率"}</TableHead>
-                <TableHead className="hidden h-9 text-right font-medium text-muted-foreground sm:table-cell">{"更新"}</TableHead>
-                <TableHead className="h-9 text-right font-medium text-muted-foreground">{"操作"}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-xs text-muted-foreground">
-                    {"加载中…"}
-                  </TableCell>
-                </TableRow>
-              ) : error ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-xs text-danger">
-                    {error}
-                  </TableCell>
-                </TableRow>
-              ) : filteredRows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-xs text-muted-foreground">
-                    {rows.length === 0 ? "暂无分组数据" : "没有匹配的分组"}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredRows.map(({ key, channel, rate }) => (
-                  <TableRow key={key}>
-                    <TableCell>{channel.name}</TableCell>
-                    <TableCell className="hidden sm:table-cell">
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-normal ring-1 ring-inset",
-                          channel.type === "newapi"
-                            ? "bg-brand/10 text-brand ring-brand/20"
-                            : "bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:text-sky-300",
-                        )}
-                      >
-                        {channelTypeLabel(channel.type)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="min-w-40 whitespace-normal sm:min-w-60">
-                      <div>{rate.model_name}</div>
-                      {rate.description ? (
-                        <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                          {rate.description}
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      <span className={cn("rounded px-1.5 py-0.5 ring-1 ring-inset", ratioTone(rate.ratio))}>
-                        {formatRatio(rate.ratio)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden text-right text-muted-foreground sm:table-cell">
-                      {relativeTime(rate.last_seen_at)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="touch-manipulation"
-                            aria-label="API Key 操作"
-                            title="API Key 操作"
-                          >
-                            <KeyRound className="size-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          portalContainer={dialogContentElement}
-                          align="end"
-                          sideOffset={6}
-                          className="z-[70]"
-                          onCloseAutoFocus={(event) => event.preventDefault()}
-                        >
-                          <DropdownMenuItem className="cursor-pointer py-2" onSelect={() => onAPIKeyAction(channel, rate, "create")}>
-                            <Plus className="size-4" />
-                            新建到此分组
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="cursor-pointer py-2" onSelect={() => onAPIKeyAction(channel, rate, "migrate")}>
-                            <ArrowRightLeft className="size-4" />
-                            将现有 API Key 移到此分组
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </ScrollArea>
-      </DialogContent>
-    </Dialog>
-  )
 }
 
 interface ChannelSyncState {
@@ -1210,7 +964,8 @@ export function ChannelCards() {
         open={groupsOpen}
         onOpenChange={setGroupsOpen}
         channels={channels ?? []}
-        nestedDialogOpen={apiKeyDialog != null}
+        nestedDialogOpen={apiKeyDialog != null || catalogChannel != null}
+        onOpenCatalog={setCatalogChannel}
         onAPIKeyAction={(channel, rate, type) => {
           setAPIKeyDialog({
             channel,
