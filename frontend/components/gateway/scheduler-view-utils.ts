@@ -9,6 +9,7 @@ import {
   routeEffectiveRate,
   routeSourceKind,
 } from "./gateway-utils"
+import { assignRouteTiers } from "./route-tiers"
 
 export type SchedulerRouteState =
   | "primary"
@@ -22,7 +23,12 @@ export interface SchedulerRouteRow {
   index: number
   rate: number
   weight: number
+  /** 同档（同倍率）内按权重的分流占比 */
   configuredShare: number
+  /** 0 = 主，1 = 备1 …；不可调度为 -1 */
+  tier: number
+  /** 同档路由数 */
+  tierSize: number
   state: SchedulerRouteState
   reason: string
   sourceLabel: string
@@ -93,9 +99,7 @@ function routeState(
 }
 
 /**
- * Mirrors the runtime's hard eligibility gate and rate ordering for a read-only UI.
- * `configuredShare` is intentionally labeled as a preview: current Flow-Router uses
- * weight as a sort tie-breaker, not as proportional traffic splitting.
+ * 与后端 SortRoutes 一致：可调度路由按倍率分档，同倍率同档按权重分流，档与档之间 failover。
  */
 export function deriveSchedulerSnapshot(
   group: GatewayGroup | null,
@@ -104,11 +108,10 @@ export function deriveSchedulerSnapshot(
   providers: GatewayProviderOption[],
   now = Date.now(),
 ): SchedulerSnapshot {
-  const direction = group?.rate_sort_direction === "desc" ? -1 : 1
-  const draftRows = routes.map((route, index) => {
+  const draftRows: SchedulerRouteRow[] = routes.map((route, index) => {
     const sourceGroups = sourceGroupsByChannel[Number(route.source_channel_id) || 0] ?? []
     const rate = routeEffectiveRate(route, sourceGroups, providers)
-    const weight = Math.max(1, Number(route.weight) || 1)
+    const weight = route.weight == null ? 1 : Math.max(0, Number(route.weight) || 0)
     const result = routeState(route, providers, now)
     return {
       route,
@@ -116,6 +119,8 @@ export function deriveSchedulerSnapshot(
       rate: Number.isFinite(rate) ? rate : 0,
       weight,
       configuredShare: 0,
+      tier: -1,
+      tierSize: 0,
       state: result.state,
       reason: result.reason,
       sourceLabel: sourceLabel(route, providers),
@@ -123,29 +128,27 @@ export function deriveSchedulerSnapshot(
     }
   })
 
-  const eligible = draftRows
-    .filter((row) => row.state === "fallback")
-    .sort((a, b) => {
-      if (a.rate !== b.rate) return (a.rate - b.rate) * direction
-      if (a.weight !== b.weight) return b.weight - a.weight
-      return a.index - b.index
-    })
-    .map<SchedulerRouteRow>((row, index) => ({
-      ...row,
-      state: index === 0 ? "primary" : "fallback",
-    }))
+  const tiered = assignRouteTiers(
+    draftRows
+      .filter((row) => row.state === "fallback")
+      .map((row) => ({ item: row, index: row.index, rate: row.rate, weight: row.weight, state: "active" as const })),
+    group?.rate_sort_direction ?? "asc",
+  )
+  const eligible = tiered.map<SchedulerRouteRow>((e) => ({
+    ...e.item,
+    tier: e.tier,
+    tierSize: e.tierSize,
+    configuredShare: e.share,
+    state: e.tier === 0 ? "primary" : "fallback",
+  }))
 
   const configuredWeightTotal = eligible.reduce((sum, row) => sum + row.weight, 0)
-  const eligibleWithShare = eligible.map((row) => ({
-    ...row,
-    configuredShare: configuredWeightTotal > 0 ? row.weight / configuredWeightTotal : 0,
-  }))
-  const eligibleByIndex = new Map(eligibleWithShare.map((row) => [row.index, row]))
+  const eligibleByIndex = new Map(eligible.map((row) => [row.index, row]))
   const rows = draftRows.map((row) => eligibleByIndex.get(row.index) ?? row)
 
   return {
     rows,
-    eligible: eligibleWithShare,
+    eligible,
     pausedCount: rows.filter((row) => row.state === "paused").length,
     disabledCount: rows.filter((row) => row.state === "disabled").length,
     invalidCount: rows.filter((row) => row.state === "invalid").length,

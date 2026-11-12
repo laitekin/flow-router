@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import { HelpCircle } from "lucide-react"
 import {
   Dialog,
@@ -32,6 +32,8 @@ import { apiFetch } from "@/lib/api"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { useCaptchaConfigs } from "@/lib/queries"
 import { cn } from "@/lib/utils"
+import type { ChannelDetectResult } from "@/lib/api-types"
+import { CaptchaProviderPicker } from "./captcha-provider-picker"
 
 interface ChannelFormDialogProps {
   open: boolean
@@ -149,6 +151,48 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
       setError(null)
     }
   }, [open, channel])
+
+  const [detectHint, setDetectHint] = useState<{ text: string; warn?: boolean } | null>(null)
+  const lastDetected = useRef("")
+  useEffect(() => {
+    if (open) {
+      setDetectHint(null)
+      lastDetected.current = channel?.site_url ?? ""
+    }
+  }, [open, channel])
+
+  /** 站点地址失焦时识别类型 + 是否开启 Turnstile，自动填好对应开关（仅新建时改类型）。 */
+  async function autoDetect() {
+    const url = form.site_url.trim()
+    if (!url || url === lastDetected.current) return
+    lastDetected.current = url
+    try {
+      const res = await apiFetch<ChannelDetectResult>("/channels/detect", {
+        method: "POST",
+        body: JSON.stringify({ site_url: url, type: isEdit ? form.type : "", proxy_enabled: form.proxy_enabled }),
+      })
+      const site = res.site
+      if (!site) {
+        setDetectHint({ text: res.error || "无法自动识别站点类型，请手动选择", warn: true })
+        return
+      }
+      setForm((f) => ({
+        ...f,
+        site_url: res.site_url,
+        type: isEdit ? f.type : site.type,
+        name: f.name.trim() ? f.name : site.site_name || f.name,
+        turnstile_enabled: f.credential_mode === "password" ? site.turnstile_enabled : f.turnstile_enabled,
+      }))
+      setDetectHint({
+        text: `已识别：${site.type === "newapi" ? "NewAPI" : "Sub2API"}${site.site_name ? ` · ${site.site_name}` : ""} · ${
+          site.turnstile_enabled ? "开启了 Turnstile（账号密码登录需打码，或改用 Token / 快速导入）" : "未开启人机验证"
+        }`,
+        warn: site.turnstile_enabled,
+      })
+    } catch {
+      // 识别失败不影响手动填写
+    }
+  }
 
   const isEdit = !!channel
   const isTokenMode = form.credential_mode === "token"
@@ -375,9 +419,15 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
               placeholder="https://example.com"
               value={form.site_url}
               onChange={(e) => setForm({ ...form, site_url: e.target.value })}
+              onBlur={() => void autoDetect()}
               required
               disabled={submitting}
             />
+            {detectHint ? (
+              <p className={cn("text-[11px]", detectHint.warn ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
+                {detectHint.text}
+              </p>
+            ) : null}
           </div>
 
           {/* 凭据类型 toggle */}
@@ -773,30 +823,15 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
               {form.turnstile_enabled ? (
                 <div className="space-y-1.5">
                   <Label htmlFor="captcha-config">打码 provider</Label>
-                  <Select
+                  <CaptchaProviderPicker
+                    id="captcha-config"
                     value={form.captcha_config_id}
-                    onValueChange={(v) => setForm({ ...form, captcha_config_id: v })}
+                    onChange={(v) => setForm((f) => ({ ...f, captcha_config_id: v }))}
+                    configs={captchas.data}
+                    loading={captchas.loading}
                     disabled={submitting}
-                  >
-                    <SelectTrigger id="captcha-config" className="w-full">
-                      <SelectValue
-                        placeholder={
-                          captchas.data && captchas.data.length > 0
-                            ? "选择 provider"
-                            : "先到底部 [验证码服务] 卡片新增"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(captchas.data ?? [])
-                        .filter((c) => c.enabled)
-                        .map((c) => (
-                          <SelectItem key={c.id} value={String(c.id)}>
-                            {c.name}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                    onCreated={() => captchas.refetch()}
+                  />
                   <p className="text-[11px] text-muted-foreground">
                     {"siteKey 会自动从上游公开接口拉取，无需在此填写。"}
                   </p>

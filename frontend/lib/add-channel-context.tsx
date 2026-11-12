@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
+import { ChannelImportDialog } from "@/components/monitor/channel-import-dialog"
 import type { Channel } from "@/lib/api-types"
 
 /**
@@ -9,7 +10,10 @@ import type { Channel } from "@/lib/api-types"
  * Dialog 本身只挂载一次，挂在 AppShell 顶层。
  */
 interface AddChannelContextValue {
+  /** 新增渠道：默认打开「快速导入」 */
   openAdd: () => void
+  /** 打开完整的手动表单（新增） */
+  openAdvanced: () => void
   openEdit: (channel: Channel) => void
 }
 
@@ -18,8 +22,12 @@ const AddChannelContext = createContext<AddChannelContextValue | null>(null)
 export function AddChannelProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<Channel | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
 
   const openAdd = useCallback(() => {
+    setImportOpen(true)
+  }, [])
+  const openAdvanced = useCallback(() => {
     setEditing(null)
     setOpen(true)
   }, [])
@@ -29,8 +37,9 @@ export function AddChannelProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AddChannelContext.Provider value={{ openAdd, openEdit }}>
+    <AddChannelContext.Provider value={{ openAdd, openAdvanced, openEdit }}>
       {children}
+      <ChannelImportDialog open={importOpen} onOpenChange={setImportOpen} onOpenAdvanced={openAdvanced} />
       <ChannelFormDialog
         open={open}
         onOpenChange={(v) => {

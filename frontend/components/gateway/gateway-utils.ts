@@ -426,7 +426,7 @@ export function routeEffectiveRate(
 }
 
 /**
- * 对齐同步账号 sortSyncAccountRows：按倍率方向 + 权重重排。
+ * 对齐后端 OrderRoutesByRate：按倍率方向排序，同倍率保持 position 顺序。
  * 返回 { route, index }，index 为原数组下标便于原地编辑。
  */
 export function sortGatewayRouteRows(
@@ -449,9 +449,8 @@ export function sortGatewayRouteRows(
     .sort((a, b) => {
       const rateDiff = (a.rate - b.rate) * dir
       if (rateDiff !== 0) return rateDiff
-      const wa = Number(a.route.weight) || 1
-      const wb = Number(b.route.weight) || 1
-      if (wa !== wb) return wb - wa
+      // 同倍率：与后端 OrderRoutesByRate 一致按 position（即当前列表顺序）；
+      // 权重不决定先后，运行时在同倍率档内按权重分流。
       return a.index - b.index
     })
 }

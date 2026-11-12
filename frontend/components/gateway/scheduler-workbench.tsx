@@ -28,6 +28,9 @@ import {
   formatSchedulerRate,
   type SchedulerRouteRow,
 } from "./scheduler-view-utils"
+import { TierBadge } from "./tier-badge"
+import { tierColor } from "./route-tiers"
+import { SOFT } from "@/lib/soft-tone"
 
 type SchedulerWorkbenchProps = {
   group: GatewayGroup | null
@@ -36,80 +39,68 @@ type SchedulerWorkbenchProps = {
   providers: GatewayProviderOption[]
 }
 
-function stateMeta(state: SchedulerRouteRow["state"]) {
+/** 分流条颜色（类名写全，Tailwind 才能扫描到） */
+const PROGRESS_TINT: Record<string, string> = {
+  emerald: "bg-emerald-500/15 [&>[data-slot=progress-indicator]]:bg-emerald-500",
+  sky: "bg-sky-500/15 [&>[data-slot=progress-indicator]]:bg-sky-500",
+  violet: "bg-violet-500/15 [&>[data-slot=progress-indicator]]:bg-violet-500",
+  slate: "bg-slate-500/15 [&>[data-slot=progress-indicator]]:bg-slate-400",
+}
+
+function stateMeta(state: SchedulerRouteRow["state"], tier = -1) {
   switch (state) {
     case "primary":
-      return {
-        label: "主路由",
-        className:
-          "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300",
-        icon: Check,
-      }
+      return { label: "主", className: SOFT.emerald.badge, iconClassName: "", icon: Check }
     case "fallback":
       return {
-        label: "备用",
-        className:
-          "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300",
+        label: tier > 0 ? `备${tier}` : "备用",
+        className: SOFT[tierColor(tier) ?? "sky"].badge,
+        iconClassName: "",
         icon: ArrowRight,
       }
     case "paused":
-      return {
-        label: "暂停",
-        className:
-          "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300",
-        icon: Pause,
-      }
+      return { label: "暂停", className: SOFT.amber.badge, iconClassName: "", icon: Pause }
     case "disabled":
-      return {
-        label: "禁用",
-        className:
-          "border-border bg-muted/60 text-muted-foreground",
-        icon: CircleOff,
-      }
+      return { label: "禁用", className: "border-border bg-muted/40 text-muted-foreground", iconClassName: "", icon: CircleOff }
     default:
-      return {
-        label: "不可调度",
-        className:
-          "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300",
-        icon: X,
-      }
+      return { label: "不可调度", className: SOFT.rose.badge, iconClassName: "", icon: X }
   }
 }
 
 function RouteChainItem({ row }: { row: SchedulerRouteRow }) {
-  const meta = stateMeta(row.state)
-  const StateIcon = meta.icon
   return (
-    <div className="min-w-0 flex-1 rounded-xl border border-border bg-background p-3 shadow-xs">
+    <div
+      className={`relative min-w-0 overflow-hidden rounded-lg border p-3 pl-3.5 ${
+        tierColor(row.tier) ? SOFT[tierColor(row.tier)!].surface : "border-border bg-background"
+      }`}
+    >
+      <span
+        className={`absolute inset-y-0 left-0 w-[3px] ${tierColor(row.tier) ? SOFT[tierColor(row.tier)!].dot : "bg-border"}`}
+        aria-hidden
+      />
       <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-semibold text-foreground">
-            {row.state === "primary" ? "1" : "→"}
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-foreground">{row.sourceLabel}</p>
-            <p className="truncate text-[11px] text-muted-foreground">
-              路由 #{row.route.id ?? "—"} · {row.protocolLabel}
-            </p>
-          </div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-foreground">{row.sourceLabel}</p>
+          <p className="truncate text-[11px] text-muted-foreground">
+            路由 #{row.route.id ?? "—"} · {row.protocolLabel}
+          </p>
         </div>
-        <Badge variant="outline" className={`shrink-0 gap-1 text-[10px] ${meta.className}`}>
-          <StateIcon className="size-3" />
-          {meta.label}
-        </Badge>
+        <TierBadge tier={row.tier} />
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-current/10 pt-2.5 text-[11px]">
         <div>
           <p className="text-muted-foreground">有效倍率</p>
-          <p className="mt-0.5 font-mono font-medium">{formatSchedulerRate(row.rate)}</p>
+          <p className="mt-0.5 font-mono tabular-nums text-foreground/90">{formatSchedulerRate(row.rate)}</p>
         </div>
         <div>
           <p className="text-muted-foreground">权重</p>
-          <p className="mt-0.5 font-mono font-medium">{row.weight}</p>
+          <p className="mt-0.5 font-mono tabular-nums text-foreground/90">{row.weight}</p>
         </div>
         <div>
-          <p className="text-muted-foreground">状态</p>
-          <p className="mt-0.5 truncate font-medium">{row.reason}</p>
+          <p className="text-muted-foreground">{row.tierSize > 1 ? "同档分流" : "流量"}</p>
+          <p className="mt-0.5 font-mono tabular-nums text-foreground/90">
+            {row.tier === 0 || row.tierSize > 1 ? formatSchedulerPercent(row.configuredShare) : "失败才用"}
+          </p>
         </div>
       </div>
     </div>
@@ -128,6 +119,15 @@ export function SchedulerWorkbench({
   )
 
   const eligibleCount = snapshot.eligible.length
+  const tiers = useMemo(() => {
+    const out: SchedulerRouteRow[][] = []
+    for (const row of snapshot.eligible) {
+      const last = out[out.length - 1]
+      if (last && last[0].tier === row.tier) last.push(row)
+      else out.push([row])
+    }
+    return out
+  }, [snapshot.eligible])
   const policy = [
     group?.retry_enabled === false ? "失败不重试" : `同路由重试 ${group?.retry_count ?? 0} 次`,
     group?.failover_enabled === false
@@ -205,9 +205,13 @@ export function SchedulerWorkbench({
           ["禁用", snapshot.disabledCount, "muted"],
           ["配置路由", snapshot.rows.length, "sky"],
         ].map(([label, value, tone]) => (
-          <div key={label} className="rounded-xl border border-border bg-background px-4 py-3 shadow-xs">
+          <div key={label} className="rounded-lg border border-border bg-background px-4 py-3">
             <p className="text-xs text-muted-foreground">{label}</p>
-            <p className={`mt-1 text-xl font-semibold ${tone === "emerald" ? "text-emerald-600 dark:text-emerald-400" : tone === "amber" ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
+            <p
+              className={`mt-1 flex items-center gap-2 text-xl font-semibold tabular-nums ${
+                tone === "emerald" ? SOFT.emerald.text : tone === "amber" && Number(value) > 0 ? SOFT.amber.text : tone === "sky" ? SOFT.sky.text : "text-foreground"
+              }`}
+            >
               {value}
             </p>
           </div>
@@ -224,7 +228,7 @@ export function SchedulerWorkbench({
                   当前尝试链
                 </CardTitle>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  首条可调度路由成功时不会主动访问后续路由；只有失败才顺延。
+                  从左到右：主 → 备1 → 备2。同一档内按权重分流；整档失败 / 冷却才顺延到下一档。
                 </p>
               </div>
               <Badge variant="outline" className="text-[10px]">
@@ -234,11 +238,18 @@ export function SchedulerWorkbench({
           </CardHeader>
           <CardContent className="space-y-3 px-4 py-4 sm:px-5">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-stretch">
-              {snapshot.eligible.map((row, index) => (
-                <div key={row.route.id ?? row.index} className="flex min-w-0 flex-1 items-center gap-2">
-                  <RouteChainItem row={row} />
-                  {index < snapshot.eligible.length - 1 ? (
-                    <ArrowRight className="hidden size-4 shrink-0 text-muted-foreground lg:block" />
+              {tiers.map((rows, index) => (
+                <div key={rows[0].tier} className="flex min-w-0 flex-1 items-center gap-2">
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    {rows.map((row) => (
+                      <RouteChainItem key={row.route.id ?? row.index} row={row} />
+                    ))}
+                    {rows.length > 1 ? (
+                      <p className="text-center text-[10px] text-muted-foreground">同倍率 · 按权重分流</p>
+                    ) : null}
+                  </div>
+                  {index < tiers.length - 1 ? (
+                    <ArrowRight className="hidden size-4 shrink-0 text-muted-foreground lg:block" aria-label="全部失败后顺延" />
                   ) : null}
                 </div>
               ))}
@@ -263,7 +274,7 @@ export function SchedulerWorkbench({
             <div>
               <CardTitle className="text-sm">路由规则明细</CardTitle>
               <p className="mt-1 text-xs text-muted-foreground">
-                权重占比仅作配置预览；当前运行时仍按倍率、权重、Position 排序。
+                顺序由有效倍率决定（同倍率按路由列表顺序）；分流占比是同一档内按权重的首选概率。
               </p>
             </div>
             <Badge variant="outline" className="gap-1.5 text-[10px]">
@@ -278,7 +289,7 @@ export function SchedulerWorkbench({
                 <th className="px-4 py-3 font-medium sm:px-5">顺序</th>
                 <th className="px-3 py-3 font-medium">上游</th>
                 <th className="px-3 py-3 font-medium">倍率</th>
-                <th className="px-3 py-3 font-medium">权重预览</th>
+                <th className="px-3 py-3 font-medium">同档分流</th>
                 <th className="px-3 py-3 font-medium">协议</th>
                 <th className="px-3 py-3 font-medium">并发配置</th>
                 <th className="px-3 py-3 font-medium">状态</th>
@@ -287,13 +298,16 @@ export function SchedulerWorkbench({
             </thead>
             <tbody className="divide-y divide-border">
               {snapshot.rows.map((row) => {
-                const meta = stateMeta(row.state)
+                const meta = stateMeta(row.state, row.tier)
                 const StateIcon = meta.icon
-                const activeIndex = snapshot.eligible.findIndex((item) => item.index === row.index)
                 return (
                   <tr key={row.route.id ?? row.index} className="align-middle">
-                    <td className="px-4 py-3 font-mono text-muted-foreground sm:px-5">
-                      {activeIndex >= 0 ? `#${activeIndex + 1}` : "—"}
+                    <td className="px-4 py-3 sm:px-5">
+                      {row.tier >= 0 ? (
+                        <TierBadge tier={row.tier} />
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="max-w-[230px] px-3 py-3">
                       <p className="truncate font-medium text-foreground">{row.sourceLabel}</p>
@@ -304,11 +318,12 @@ export function SchedulerWorkbench({
                     <td className="px-3 py-3 font-mono">{formatSchedulerRate(row.rate)}</td>
                     <td className="w-[145px] px-3 py-3">
                       <div className="flex items-center gap-2">
-                        <Progress value={row.configuredShare * 100} className="h-1.5" />
-                        <span className="w-8 shrink-0 text-right font-mono text-[11px]">
-                          {row.state === "primary" || row.state === "fallback"
-                            ? formatSchedulerPercent(row.configuredShare)
-                            : "—"}
+                        <Progress
+                          value={row.tierSize > 1 ? row.configuredShare * 100 : 0}
+                          className={`h-1 ${PROGRESS_TINT[tierColor(row.tier) ?? "slate"]}`}
+                        />
+                        <span className="w-8 shrink-0 text-right font-mono text-[11px] text-muted-foreground tabular-nums">
+                          {row.tierSize > 1 ? formatSchedulerPercent(row.configuredShare) : "—"}
                         </span>
                       </div>
                     </td>
@@ -318,7 +333,7 @@ export function SchedulerWorkbench({
                     </td>
                     <td className="px-3 py-3">
                       <Badge variant="outline" className={`gap-1 text-[10px] ${meta.className}`}>
-                        <StateIcon className="size-3" /> {meta.label}
+                        <StateIcon className={`size-3 ${meta.iconClassName}`} /> {meta.label}
                       </Badge>
                     </td>
                     <td className="max-w-[180px] truncate px-4 py-3 text-muted-foreground sm:px-5">

@@ -1,5 +1,5 @@
-import { useState, type Dispatch, type SetStateAction } from "react"
-import { Check, ChevronDown, Loader2, Play, Plus, Trash2 } from "lucide-react"
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react"
+import { Check, ChevronDown, Loader2, Play, Plus, Trash2, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -52,6 +52,8 @@ import {
   sourceGroupOptionValue,
   sourceGroupSelectValue,
 } from "./gateway-utils"
+import { assignRouteTiers } from "./route-tiers"
+import { TierBadge } from "./tier-badge"
 
 type ChannelOption = { id: number; name: string }
 
@@ -208,6 +210,8 @@ type RoutesPanelProps = {
   onLoadProviderOptions: () => void
   onSaveRoutes: () => void
   onEnsureKeys: () => void
+  /** 打开「快速配置」向导 */
+  onQuickSetup?: () => void
   onClearRoutePause: (routeID?: number) => void
   onShowPauseError: (route: Partial<GatewayRoute>) => void
   /** 各路由仍生效的冷却（key 为路由 id） */
@@ -236,6 +240,7 @@ export function RoutesPanel({
   onLoadProviderOptions,
   onSaveRoutes,
   onEnsureKeys,
+  onQuickSetup,
   onClearRoutePause,
   onShowPauseError,
   routeCooldowns,
@@ -244,6 +249,26 @@ export function RoutesPanel({
   highlightedRouteID,
   stats,
 }: RoutesPanelProps) {
+  // 主备分档：与后端调度一致（不可调度的路由不分档）
+  const tierByIndex = useMemo(() => {
+    const now = Date.now()
+    const entries = assignRouteTiers(
+      sortedRouteRows.map(({ route: r, index, rate }) => {
+        const cooldown = r.id ? routeCooldowns?.[r.id] : undefined
+        const paused = isRouteTempPaused(r.temp_unschedulable_until, now) || hasRouteCooldown(cooldown)
+        return {
+          item: index,
+          index,
+          rate: Number.isFinite(rate) ? rate : 0,
+          weight: r.weight == null ? 1 : Math.max(0, Number(r.weight) || 0),
+          state: r.enabled === false ? ("disabled" as const) : paused ? ("paused" as const) : ("active" as const),
+        }
+      }),
+      rateSort,
+    )
+    return new Map(entries.map((e) => [e.item, e]))
+  }, [sortedRouteRows, routeCooldowns, rateSort])
+
   return (
     <div className="space-y-4">
 <Card className="overflow-hidden border-border shadow-none">
@@ -277,13 +302,18 @@ export function RoutesPanel({
         </Button>
       </div>
       <div className="flex-1" />
+      {onQuickSetup ? (
+        <Button size="sm" className="h-9" onClick={onQuickSetup} disabled={busy}>
+          <Zap className="size-3.5" /> 快速配置
+        </Button>
+      ) : null}
       <Button
         size="sm"
         variant="outline"
         className="h-9"
         onClick={() => setRouteDrafts([...routeDrafts, emptyRoute()])}
       >
-        <Plus className="size-3.5" /> 添加路由
+        <Plus className="size-3.5" /> 手动添加
       </Button>
       <Button
         size="sm"
@@ -306,7 +336,11 @@ export function RoutesPanel({
     <p className="text-[11px] leading-5 text-muted-foreground">
       列表顺序 = 尝试顺序：按账号计费倍率
       {rateSort === "desc" ? "从高到低" : "从低到高"}
-      排列；同倍率时权重大优先。
+      排列。同倍率的路由是同一档（
+      <TierBadge tier={0} className="mx-0.5 align-middle" />→
+      <TierBadge tier={1} className="mx-0.5 align-middle" />→
+      <TierBadge tier={2} className="mx-0.5 align-middle" />
+      …），档内按权重分流，整档失败 / 冷却才顺延到下一档。
       {rateResortEnabled
         ? "已在编辑组中开启「渠道分组价格倍率重排」：倍率扫描结束后会按源分组实时倍率自动重写顺序与计费倍率。"
         : "未开启价格倍率重排时，仅保存路由 / 改排序方向会落库顺序；可在编辑组中开启。"}
@@ -335,6 +369,7 @@ export function RoutesPanel({
         </TableHeader>
         <TableBody>
           {sortedRouteRows.map(({ route: r, index: idx }, order) => {
+            const tierEntry = tierByIndex.get(idx)
             const kind = routeSourceKind(r)
             const chId = Number(r.source_channel_id) || 0
             const providerID = Number(r.gateway_provider_id) || 0
@@ -364,7 +399,26 @@ export function RoutesPanel({
                 )}
               >
                 <TableCell className="text-center text-xs tabular-nums text-muted-foreground">
-                  {order + 1}
+                  <div className="flex flex-col items-center gap-1">
+                    <TierBadge
+                      tier={tierEntry?.tier ?? -1}
+                      inactiveLabel={tierEntry?.state === "paused" ? "冷却" : "停用"}
+                      title={
+                        tierEntry && tierEntry.tier >= 0
+                          ? tierEntry.tierSize > 1
+                            ? `同档 ${tierEntry.tierSize} 条按权重分流，本条 ${Math.round(tierEntry.share * 100)}%`
+                            : tierEntry.tier === 0
+                              ? "主路由：首选"
+                              : `备用第 ${tierEntry.tier} 档`
+                          : "不参与调度"
+                      }
+                    />
+                    {tierEntry && tierEntry.tierSize > 1 ? (
+                      <span className="text-[10px] tabular-nums text-muted-foreground">{Math.round(tierEntry.share * 100)}%</span>
+                    ) : (
+                      <span className="text-[10px] tabular-nums text-muted-foreground/60">{order + 1}</span>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
                   {r.id ? (
@@ -830,8 +884,16 @@ export function RoutesPanel({
           })}
           {routeDrafts.length === 0 && (
             <TableRow>
-              <TableCell colSpan={13} className="text-center text-muted-foreground">
-                添加路由后保存。监控渠道需「确保上游密钥」；直连渠道使用已配置的 Key
+              <TableCell colSpan={13} className="py-10 text-center">
+                <p className="text-sm text-foreground">还没有路由</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  用「快速配置」勾选渠道分组，一键完成路由、上游密钥和模型同步
+                </p>
+                {onQuickSetup ? (
+                  <Button size="sm" className="mt-3" onClick={onQuickSetup}>
+                    <Zap className="size-3.5" /> 快速配置
+                  </Button>
+                ) : null}
               </TableCell>
             </TableRow>
           )}
