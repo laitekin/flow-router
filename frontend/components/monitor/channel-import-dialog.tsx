@@ -51,6 +51,7 @@ import {
   type ImportDraft,
 } from "@/lib/channel-import"
 import { cn } from "@/lib/utils"
+import { SOFT } from "@/lib/soft-tone"
 import { CaptchaProviderPicker } from "./captcha-provider-picker"
 import { GroupCatalogView, formatUSD } from "./group-catalog-view"
 
@@ -176,7 +177,9 @@ export function ChannelImportDialog({ open, onOpenChange, onOpenAdvanced }: Chan
       <DialogContent className="grid-cols-1 sm:max-w-3xl [&>*]:min-w-0">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="size-4 text-muted-foreground" />
+            <span className={cn("flex size-6 items-center justify-center rounded-md border", SOFT.blue.badge)}>
+              <Sparkles className="size-3.5" />
+            </span>
             快速导入渠道
           </DialogTitle>
           <DialogDescription>
@@ -243,7 +246,7 @@ function Step({ n, title, done, children }: { n: number; title: string; done?: b
           className={cn(
             "flex size-5 items-center justify-center rounded-full border text-[10px] font-medium tabular-nums",
             done
-              ? "border-emerald-600/30 bg-emerald-500/10 text-emerald-700/90 dark:text-emerald-400/80"
+              ? "border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
               : "border-border bg-background text-muted-foreground",
           )}
         >
@@ -409,17 +412,19 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
             {site ? (
               <>
-                <span className="rounded-md border border-border bg-background px-1.5 py-0.5 font-medium text-foreground/85">{TYPE_LABEL[site.type]}</span>
+                <span className={cn("rounded-md border px-1.5 py-0.5 font-medium", site.type === "newapi" ? SOFT.violet.badge : SOFT.blue.badge)}>
+                  {TYPE_LABEL[site.type]}
+                </span>
                 {site.site_name ? <span className="text-muted-foreground">{site.site_name}</span> : null}
                 <span className="text-muted-foreground">{siteURL}</span>
                 {site.turnstile_enabled ? (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-foreground/80">
-                    <ShieldCheck className="size-3 text-amber-600/80 dark:text-amber-400/80" />
+                  <span className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5", SOFT.amber.badge)}>
+                    <ShieldCheck className="size-3" />
                     开启了 Turnstile 人机验证
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-foreground/80">
-                    <Check className="size-3 text-emerald-600/80 dark:text-emerald-400/80" />
+                  <span className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5", SOFT.emerald.badge)}>
+                    <Check className="size-3" />
                     无人机验证
                   </span>
                 )}
@@ -428,7 +433,7 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
                 ) : null}
               </>
             ) : (
-              <span className="inline-flex items-center gap-1 text-amber-700/90 dark:text-amber-400/80">
+              <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
                 <AlertTriangle className="size-3" />
                 {detect.error || "无法自动识别"}，请手动选择类型：
               </span>
@@ -468,9 +473,16 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              <Icon className={cn("size-3.5", method === key ? "text-foreground/70" : "")} />
+              <Icon className={cn("size-3.5", method === key ? SOFT.blue.text : "")} />
               <span className="font-medium">{label}</span>
-              <span className="text-[10px] text-muted-foreground">{hint}</span>
+              <span
+                className={cn(
+                  "text-[10px]",
+                  key === "browser" ? SOFT.emerald.text : key === "password" && site?.turnstile_enabled ? SOFT.amber.text : "text-muted-foreground",
+                )}
+              >
+                {hint}
+              </span>
             </button>
           ))}
         </div>
@@ -509,7 +521,7 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
                 </div>
               </div>
               {site && !site.password_login_enabled ? (
-                <p className="text-[11px] text-amber-700/90 dark:text-amber-400/80">该站点关闭了密码登录，请用「浏览器导入」。</p>
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">该站点关闭了密码登录，请用「浏览器导入」。</p>
               ) : null}
               <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
                 <div>
@@ -559,8 +571,8 @@ function SingleImport({ active, onDone }: { active: boolean; onDone: () => void 
       </Step>
 
       {error ? (
-        <p className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-foreground/85" role="alert">
-          <AlertTriangle className="mt-px size-3.5 shrink-0 text-rose-500/80" />
+        <p className={cn("flex items-start gap-2 rounded-md border px-3 py-2 text-xs", SOFT.rose.badge)} role="alert">
+          <AlertTriangle className="mt-px size-3.5 shrink-0" />
           {error}
         </p>
       ) : null}
@@ -598,7 +610,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
   return (
     <div className="rounded-lg border border-border px-3 py-2" title={hint}>
       <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className={cn("font-mono text-sm font-semibold tabular-nums", hint && "text-amber-700/90 dark:text-amber-400/80")}>{hint ? "获取失败" : value}</p>
+      <p className={cn("font-mono text-sm font-semibold tabular-nums", hint && "text-amber-700 dark:text-amber-300")}>{hint ? "获取失败" : value}</p>
     </div>
   )
 }
@@ -661,7 +673,7 @@ function BrowserImportPanel({
               </Button>
             </div>
             {type === "newapi" ? (
-              <p className="text-[11px] text-amber-700/90 dark:text-amber-400/80">
+              <p className="text-[11px] text-amber-700 dark:text-amber-300">
                 NewAPI 会重新生成「系统访问令牌」，旧的系统访问令牌（如有）会失效；API 密钥不受影响。
               </p>
             ) : null}
@@ -679,7 +691,7 @@ function BrowserImportPanel({
               className="field-sizing-fixed font-mono text-[11px] break-all"
             />
             {parsed ? (
-              <p className="inline-flex items-center gap-1 text-[11px] text-emerald-700/90 dark:text-emerald-400/80">
+              <p className="inline-flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-300">
                 <Check className="size-3" />
                 已识别 {parsed.type ? TYPE_LABEL[parsed.type] : ""} 凭据{parsed.username ? ` · ${parsed.username}` : ""}
                 {parsed.refresh_token ? " · 含 refresh_token（可自动续期）" : ""}
@@ -838,10 +850,10 @@ function BatchImport({ active }: { active: boolean }) {
 
   const statusTone: Record<RowStatus, string> = {
     pending: "text-muted-foreground",
-    working: "text-muted-foreground",
-    ready: "text-emerald-700/90 dark:text-emerald-400/80",
-    error: "text-rose-600/90 dark:text-rose-400/80",
-    saved: "text-emerald-700/90 dark:text-emerald-400/80",
+    working: SOFT.sky.text,
+    ready: SOFT.emerald.text,
+    error: SOFT.rose.text,
+    saved: SOFT.emerald.text,
   }
 
   const openPreview = useMemo(() => rows.find((r) => r.key === openRow)?.preview ?? null, [rows, openRow])
@@ -881,7 +893,9 @@ function BatchImport({ active }: { active: boolean }) {
                 <li key={r.key} className="flex items-center gap-2 px-3 py-2 text-xs">
                   <span className="w-14 shrink-0">
                     {r.type ? (
-                      <span className="rounded border border-border px-1 py-0.5 text-[10px] text-muted-foreground">{TYPE_LABEL[r.type]}</span>
+                      <span className={cn("rounded border px-1 py-0.5 text-[10px] font-medium", r.type === "newapi" ? SOFT.violet.badge : SOFT.blue.badge)}>
+                        {TYPE_LABEL[r.type]}
+                      </span>
                     ) : (
                       <span className="text-[10px] text-muted-foreground">待识别</span>
                     )}
@@ -889,7 +903,7 @@ function BatchImport({ active }: { active: boolean }) {
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">
                       {r.siteName || hostOf(r.draft.site_url)}
-                      {r.turnstile ? <ShieldCheck className="ml-1 inline size-3 text-muted-foreground" aria-label="Turnstile" /> : null}
+                      {r.turnstile ? <ShieldCheck className={cn("ml-1 inline size-3", SOFT.amber.text)} aria-label="Turnstile" /> : null}
                     </p>
                     <p className="truncate text-[11px] text-muted-foreground">
                       {r.draft.credential_mode === "token" ? "Token" : r.draft.username || "（无账号）"}

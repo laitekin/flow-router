@@ -46,7 +46,8 @@ import {
   modelSourceTests,
   type ModelSourceLabel,
 } from "./gateway-utils"
-import { assignRouteTiers, tierLabel, type TierEntry, type TierState } from "./route-tiers"
+import { assignRouteTiers, tierColor, tierLabel, type TierEntry, type TierState } from "./route-tiers"
+import { SOFT } from "@/lib/soft-tone"
 import { TierBadge, TierBars } from "./tier-badge"
 
 const MODELS_MODE_OPTIONS = [
@@ -141,10 +142,10 @@ function tierModelSources(
 
 function testDot(tr?: GatewayModelTestResult) {
   if (!tr) return "border border-muted-foreground/50 bg-transparent"
-  if (!tr.ok) return "bg-rose-500/80"
-  if (tr.latency_ms <= 5_000) return "bg-emerald-500/80"
-  if (tr.latency_ms <= 10_000) return "bg-amber-500/80"
-  return "bg-orange-500/80"
+  if (!tr.ok) return "bg-rose-500"
+  if (tr.latency_ms <= 5_000) return "bg-emerald-500"
+  if (tr.latency_ms <= 10_000) return "bg-amber-500"
+  return "bg-orange-500"
 }
 
 export function ModelsPanel({
@@ -334,10 +335,12 @@ export function ModelsPanel({
                                   type="button"
                                   disabled={tagBusy}
                                   className={cn(
-                                    "inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border border-border bg-background px-1.5 text-left text-[11px] font-normal text-foreground/85 transition-colors",
-                                    "cursor-pointer outline-none hover:border-foreground/20 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40",
+                                    "inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border px-1.5 text-left text-[11px] font-normal text-foreground/90 transition-colors",
+                                    "cursor-pointer outline-none hover:brightness-[0.98] focus-visible:ring-2 focus-visible:ring-ring/40 dark:hover:brightness-110",
                                     "disabled:cursor-wait disabled:opacity-80",
-                                    entry.tier < 0 && "border-dashed text-muted-foreground",
+                                    entry.bound && tierColor(entry.tier)
+                                      ? SOFT[tierColor(entry.tier)!].surface
+                                      : "border-dashed border-border bg-muted/30 text-muted-foreground",
                                     tagBusy && "ring-1 ring-ring/30",
                                   )}
                                   onClick={() => {
@@ -348,7 +351,12 @@ export function ModelsPanel({
                                     }
                                   }}
                                 >
-                                  <span className="inline-flex shrink-0 items-center gap-1 border-r border-border pr-1.5 text-[10px] font-medium text-muted-foreground">
+                                  <span
+                                    className={cn(
+                                      "inline-flex shrink-0 items-center gap-1 border-r border-current/15 pr-1.5 text-[10px] font-semibold",
+                                      entry.bound && tierColor(entry.tier) ? SOFT[tierColor(entry.tier)!].text : "text-muted-foreground",
+                                    )}
+                                  >
                                     <TierBars tier={entry.bound ? entry.tier : -1} />
                                     {pill}
                                   </span>
@@ -501,19 +509,19 @@ export function ModelsPanel({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
         {[0, 1, 2].map((t) => (
           <span key={t} className="inline-flex items-center gap-1.5">
-            <TierBadge tier={t} bare />
+            <TierBadge tier={t} />
             <span>{t === 0 ? "首选" : t === 1 ? "主档全挂才用" : "再往后顺延"}</span>
           </span>
         ))}
         <span className="inline-flex items-center gap-1.5">
-          <TierBadge tier={-1} inactiveLabel="停用 / 冷却" bare />
+          <TierBadge tier={-1} inactiveLabel="停用 / 冷却" />
           <span>不参与</span>
         </span>
         <span className="h-3 w-px bg-border" aria-hidden />
         <span className="inline-flex items-center gap-1.5">
-          <span className="size-1.5 rounded-full bg-emerald-500/80" />可用
-          <span className="size-1.5 rounded-full bg-amber-500/80" />慢
-          <span className="size-1.5 rounded-full bg-rose-500/80" />失败
+          <span className="size-1.5 rounded-full bg-emerald-500" />可用
+          <span className="size-1.5 rounded-full bg-amber-500" />慢
+          <span className="size-1.5 rounded-full bg-rose-500" />失败
           <span className="size-1.5 rounded-full border border-muted-foreground/50" />未测
         </span>
       </div>

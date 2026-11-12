@@ -1,3 +1,5 @@
+import type { SoftColor } from "@/lib/soft-tone"
+
 /**
  * 主备分档：与后端 gateway/select.go 的 SortRoutes 对齐。
  *
@@ -67,19 +69,8 @@ export function tierLabel(tier: number): string {
   return tier === 0 ? "主" : `备${tier}`
 }
 
-/**
- * 每档的强调色：只用在小号「信号格」图标上，表面保持中性（Linear 风格）。
- * 主 = 柔和绿，备1 = 柔和蓝，备2 = 柔和紫，更后 = 灰。
- */
-export function tierAccent(tier: number): string {
-  switch (tier) {
-    case 0:
-      return "bg-emerald-500/85 dark:bg-emerald-400/80"
-    case 1:
-      return "bg-sky-500/75 dark:bg-sky-400/70"
-    case 2:
-      return "bg-violet-400/80 dark:bg-violet-400/70"
-    default:
-      return "bg-zinc-400/80 dark:bg-zinc-500"
-  }
+/** 每档的柔和色：主 = 绿，备1 = 蓝，备2 = 紫，更后 = 石板灰；不可调度为 null。 */
+export function tierColor(tier: number): SoftColor | null {
+  if (tier < 0) return null
+  return (["emerald", "sky", "violet"] as const)[tier] ?? "slate"
 }

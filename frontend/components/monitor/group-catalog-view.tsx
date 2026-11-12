@@ -6,24 +6,25 @@ import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { CatalogModel, GroupCatalog } from "@/lib/api-types"
 import { cn } from "@/lib/utils"
+import { SOFT, type SoftColor } from "@/lib/soft-tone"
 
 /**
  * GroupCatalogView 展示「分组 → 分组倍率（价格）→ 分组下的模型」。
  * 快速导入预览与渠道「分组与模型」对话框共用。
  */
 
-/** 平台只用一个小色点区分，文字保持中性。 */
-const PLATFORM_DOT: Record<string, string> = {
-  anthropic: "bg-orange-400/80",
-  openai: "bg-emerald-500/70",
-  gemini: "bg-sky-500/70",
-  antigravity: "bg-violet-400/80",
+/** 平台用柔和彩色小标签区分。 */
+const PLATFORM_COLOR: Record<string, SoftColor> = {
+  anthropic: "orange",
+  openai: "emerald",
+  gemini: "sky",
+  antigravity: "violet",
 }
 
 function PlatformTag({ platform }: { platform: string }) {
+  const color = PLATFORM_COLOR[platform.toLowerCase()] ?? "slate"
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-      <span className={cn("size-1.5 rounded-full", PLATFORM_DOT[platform.toLowerCase()] ?? "bg-muted-foreground/40")} />
+    <span className={cn("inline-flex h-[18px] items-center rounded border px-1.5 text-[10px] font-medium", SOFT[color].badge)}>
       {platform}
     </span>
   )
@@ -62,19 +63,20 @@ function modelSortPrice(m: CatalogModel, ratio: number): number {
   return Number.POSITIVE_INFINITY
 }
 
-/** 倍率：中性等宽字，只有最便宜的一档用柔和绿色文字点出来。 */
+/** 倍率：最便宜一档绿色、贵于 1 倍的琥珀色，其余中性。 */
 function RatioText({ ratio, min, max, className }: { ratio: number; min: number; max: number; className?: string }) {
   const cheapest = max > min && ratio === min
+  const tone = cheapest ? SOFT.emerald.badge : ratio > 1 ? SOFT.amber.badge : "border-border bg-background text-foreground/80"
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center justify-end gap-1 font-mono text-xs tabular-nums",
-        cheapest ? "text-emerald-700 dark:text-emerald-400/90" : ratio > 1 ? "text-foreground/90" : "text-foreground/75",
+        "inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-md border px-1.5 font-mono text-xs font-medium tabular-nums",
+        tone,
         className,
       )}
       title="分组倍率：实际价 = 模型基础价 × 分组倍率"
     >
-      {cheapest ? <span className="font-sans text-[10px] text-emerald-700/70 dark:text-emerald-400/70">最低</span> : null}
+      {cheapest ? <span className="font-sans text-[10px] font-normal opacity-80">最低</span> : null}
       {formatRatio(ratio)}
     </span>
   )
@@ -151,14 +153,14 @@ export function GroupCatalogView({ groups, className, maxHeightClass = "max-h-[2
                     <span
                       className={cn(
                         "w-9 shrink-0 text-center text-[10px] tabular-nums",
-                        i === 0 ? "font-medium text-emerald-700 dark:text-emerald-400/90" : "text-muted-foreground",
+                        i === 0 ? cn("font-medium", SOFT.emerald.text) : "text-muted-foreground",
                       )}
                     >
                       {i === 0 ? "最便宜" : `#${i + 1}`}
                     </span>
                     <code className="min-w-0 flex-1 truncate font-mono" title={model.name}>{model.name}</code>
                     <span className="max-w-[9rem] shrink-0 truncate text-muted-foreground" title={group.name}>{group.name}</span>
-                    <RatioText ratio={group.ratio} min={minRatio} max={maxRatio} className="w-12" />
+                    <RatioText ratio={group.ratio} min={minRatio} max={maxRatio} className="min-w-12" />
                     <span className="w-[9.5rem] shrink-0 text-right font-mono text-[11px] tabular-nums text-foreground/80">{price ?? "—"}</span>
                   </li>
                 )
@@ -190,7 +192,7 @@ export function GroupCatalogView({ groups, className, maxHeightClass = "max-h-[2
                         <span className="truncate text-[13px] font-medium text-foreground">{g.name}</span>
                         {g.platform ? <PlatformTag platform={g.platform} /> : null}
                         {g.subscription_type === "subscription" ? (
-                          <span className="rounded border border-border px-1 text-[10px] leading-4 text-muted-foreground">订阅</span>
+                          <span className={cn("inline-flex h-[18px] items-center rounded border px-1.5 text-[10px] font-medium", SOFT.violet.badge)}>订阅</span>
                         ) : null}
                       </div>
                       {g.description ? (
@@ -200,7 +202,7 @@ export function GroupCatalogView({ groups, className, maxHeightClass = "max-h-[2
                     <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
                       {g.models_known ? `${g.models.length} 个模型` : "模型未公开"}
                     </span>
-                    <RatioText ratio={g.ratio} min={minRatio} max={maxRatio} className="w-20" />
+                    <RatioText ratio={g.ratio} min={minRatio} max={maxRatio} className="min-w-16" />
                   </button>
                   {open ? (
                     <div className="border-t border-border/60 bg-muted/20 px-3 pt-2 pb-2.5 pl-8">

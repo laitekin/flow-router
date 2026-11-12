@@ -29,6 +29,8 @@ import {
   type SchedulerRouteRow,
 } from "./scheduler-view-utils"
 import { TierBadge } from "./tier-badge"
+import { tierColor } from "./route-tiers"
+import { SOFT } from "@/lib/soft-tone"
 
 type SchedulerWorkbenchProps = {
   group: GatewayGroup | null
@@ -37,31 +39,45 @@ type SchedulerWorkbenchProps = {
   providers: GatewayProviderOption[]
 }
 
-const NEUTRAL_BADGE = "border-border bg-background text-foreground/80"
+/** 分流条颜色（类名写全，Tailwind 才能扫描到） */
+const PROGRESS_TINT: Record<string, string> = {
+  emerald: "bg-emerald-500/15 [&>[data-slot=progress-indicator]]:bg-emerald-500",
+  sky: "bg-sky-500/15 [&>[data-slot=progress-indicator]]:bg-sky-500",
+  violet: "bg-violet-500/15 [&>[data-slot=progress-indicator]]:bg-violet-500",
+  slate: "bg-slate-500/15 [&>[data-slot=progress-indicator]]:bg-slate-400",
+}
 
 function stateMeta(state: SchedulerRouteRow["state"], tier = -1) {
   switch (state) {
     case "primary":
-      return { label: "主", className: NEUTRAL_BADGE, iconClassName: "text-emerald-600/80 dark:text-emerald-400/80", icon: Check }
+      return { label: "主", className: SOFT.emerald.badge, iconClassName: "", icon: Check }
     case "fallback":
       return {
         label: tier > 0 ? `备${tier}` : "备用",
-        className: NEUTRAL_BADGE,
-        iconClassName: "text-muted-foreground",
+        className: SOFT[tierColor(tier) ?? "sky"].badge,
+        iconClassName: "",
         icon: ArrowRight,
       }
     case "paused":
-      return { label: "暂停", className: NEUTRAL_BADGE, iconClassName: "text-amber-600/80 dark:text-amber-400/80", icon: Pause }
+      return { label: "暂停", className: SOFT.amber.badge, iconClassName: "", icon: Pause }
     case "disabled":
       return { label: "禁用", className: "border-border bg-muted/40 text-muted-foreground", iconClassName: "", icon: CircleOff }
     default:
-      return { label: "不可调度", className: NEUTRAL_BADGE, iconClassName: "text-rose-600/80 dark:text-rose-400/80", icon: X }
+      return { label: "不可调度", className: SOFT.rose.badge, iconClassName: "", icon: X }
   }
 }
 
 function RouteChainItem({ row }: { row: SchedulerRouteRow }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-background p-3 transition-colors hover:border-foreground/15">
+    <div
+      className={`relative min-w-0 overflow-hidden rounded-lg border p-3 pl-3.5 ${
+        tierColor(row.tier) ? SOFT[tierColor(row.tier)!].surface : "border-border bg-background"
+      }`}
+    >
+      <span
+        className={`absolute inset-y-0 left-0 w-[3px] ${tierColor(row.tier) ? SOFT[tierColor(row.tier)!].dot : "bg-border"}`}
+        aria-hidden
+      />
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-foreground">{row.sourceLabel}</p>
@@ -71,7 +87,7 @@ function RouteChainItem({ row }: { row: SchedulerRouteRow }) {
         </div>
         <TierBadge tier={row.tier} />
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/70 pt-2.5 text-[11px]">
+      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-current/10 pt-2.5 text-[11px]">
         <div>
           <p className="text-muted-foreground">有效倍率</p>
           <p className="mt-0.5 font-mono tabular-nums text-foreground/90">{formatSchedulerRate(row.rate)}</p>
@@ -191,14 +207,12 @@ export function SchedulerWorkbench({
         ].map(([label, value, tone]) => (
           <div key={label} className="rounded-lg border border-border bg-background px-4 py-3">
             <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="mt-1 flex items-center gap-2 text-xl font-semibold tabular-nums text-foreground">
+            <p
+              className={`mt-1 flex items-center gap-2 text-xl font-semibold tabular-nums ${
+                tone === "emerald" ? SOFT.emerald.text : tone === "amber" && Number(value) > 0 ? SOFT.amber.text : tone === "sky" ? SOFT.sky.text : "text-foreground"
+              }`}
+            >
               {value}
-              {tone === "emerald" || tone === "amber" ? (
-                <span
-                  className={`size-1.5 rounded-full ${tone === "emerald" ? "bg-emerald-500/80" : Number(value) > 0 ? "bg-amber-500/80" : "bg-muted-foreground/30"}`}
-                  aria-hidden
-                />
-              ) : null}
             </p>
           </div>
         ))}
@@ -235,7 +249,7 @@ export function SchedulerWorkbench({
                     ) : null}
                   </div>
                   {index < tiers.length - 1 ? (
-                    <ArrowRight className="hidden size-3.5 shrink-0 text-muted-foreground/50 lg:block" aria-label="全部失败后顺延" />
+                    <ArrowRight className="hidden size-4 shrink-0 text-muted-foreground lg:block" aria-label="全部失败后顺延" />
                   ) : null}
                 </div>
               ))}
@@ -304,7 +318,10 @@ export function SchedulerWorkbench({
                     <td className="px-3 py-3 font-mono">{formatSchedulerRate(row.rate)}</td>
                     <td className="w-[145px] px-3 py-3">
                       <div className="flex items-center gap-2">
-                        <Progress value={row.tierSize > 1 ? row.configuredShare * 100 : 0} className="h-1" />
+                        <Progress
+                          value={row.tierSize > 1 ? row.configuredShare * 100 : 0}
+                          className={`h-1 ${PROGRESS_TINT[tierColor(row.tier) ?? "slate"]}`}
+                        />
                         <span className="w-8 shrink-0 text-right font-mono text-[11px] text-muted-foreground tabular-nums">
                           {row.tierSize > 1 ? formatSchedulerPercent(row.configuredShare) : "—"}
                         </span>

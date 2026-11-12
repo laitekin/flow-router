@@ -329,9 +329,9 @@ export function RoutesPanel({
       列表顺序 = 尝试顺序：按账号计费倍率
       {rateSort === "desc" ? "从高到低" : "从低到高"}
       排列。同倍率的路由是同一档（
-      <TierBadge tier={0} bare className="mx-0.5 align-[-1px]" />→
-      <TierBadge tier={1} bare className="mx-0.5 align-[-1px]" />→
-      <TierBadge tier={2} bare className="mx-0.5 align-[-1px]" />
+      <TierBadge tier={0} className="mx-0.5 align-middle" />→
+      <TierBadge tier={1} className="mx-0.5 align-middle" />→
+      <TierBadge tier={2} className="mx-0.5 align-middle" />
       …），档内按权重分流，整档失败 / 冷却才顺延到下一档。
       {rateResortEnabled
         ? "已在编辑组中开启「渠道分组价格倍率重排」：倍率扫描结束后会按源分组实时倍率自动重写顺序与计费倍率。"
