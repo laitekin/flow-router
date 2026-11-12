@@ -1351,3 +1351,57 @@ export interface GatewayUsageSummary {
   routes: Record<string, GatewayUsageStat>
   providers: Record<string, GatewayUsageStat>
 }
+
+// ---------- 快速导入 / 分组目录 ----------
+
+/** 站点公开接口识别结果（POST /channels/detect） */
+export interface ChannelSiteInfo {
+  type: ChannelType
+  site_name?: string
+  version?: string
+  turnstile_enabled: boolean
+  registration_enabled: boolean
+  password_login_enabled: boolean
+  oauth_providers?: string[]
+}
+
+export interface ChannelDetectResult {
+  site_url: string
+  site?: ChannelSiteInfo | null
+  /** 识别失败原因（仍会返回规范化后的 site_url） */
+  error?: string
+}
+
+/** 分组下的一个模型。价格为分组倍率 = 1 时的基础价（USD）。 */
+export interface CatalogModel {
+  name: string
+  platform?: string
+  input_per_mtok?: number | null
+  output_per_mtok?: number | null
+  per_request?: number | null
+}
+
+/** 一个分组 = 上游的一个价格档 + 能用的模型。 */
+export interface GroupCatalog {
+  id?: number | null
+  name: string
+  description?: string
+  ratio: number
+  platform?: string
+  subscription_type?: string
+  models: CatalogModel[]
+  /** false = 上游没公开分组模型清单（不是 0 个模型） */
+  models_known: boolean
+}
+
+/** POST /channels/preview */
+export interface ChannelPreviewResult {
+  ticket: string
+  ticket_expires_at: string
+  site_url: string
+  user_id?: string
+  balance?: number | null
+  balance_error?: string
+  groups: GroupCatalog[]
+  groups_error?: string
+}

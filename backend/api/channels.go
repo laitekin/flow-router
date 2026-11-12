@@ -22,6 +22,7 @@ func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp.GET("", func(c *gin.Context) { listChannels(c, d) })
 	gp.POST("", func(c *gin.Context) { createChannel(c, d) })
 	gp.POST("/sync-all", func(c *gin.Context) { syncAllChannels(c, d) })
+	registerChannelOnboard(gp, d)
 	gp.GET("/:id", func(c *gin.Context) { getChannel(c, d) })
 	gp.PUT("/:id", func(c *gin.Context) { updateChannel(c, d) })
 	gp.DELETE("/:id", func(c *gin.Context) { deleteChannel(c, d) })
@@ -69,6 +70,8 @@ type channelInput struct {
 	RechargeMultiplierMode string                 `json:"recharge_multiplier_mode"`
 	MonitorEnabled         bool                   `json:"monitor_enabled"`
 	OnlyCreatedKeyGroupsEnabled bool             `json:"only_created_key_groups_enabled"`
+	// PreviewTicket 快速导入预览返回的票据：凭据一致时直接复用预览登录的会话，不再二次登录 / 打码。
+	PreviewTicket string `json:"preview_ticket"`
 }
 
 type channelUpdateInput struct {
@@ -157,7 +160,7 @@ func createChannel(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	created, err := d.ChannelSvc.Create(channel.CreateInput{
+	createIn := channel.CreateInput{
 		Name:                   in.Name,
 		Type:                   in.Type,
 		SiteURL:                in.SiteURL,
@@ -178,10 +181,14 @@ func createChannel(c *gin.Context, d *Deps) {
 		RechargeMultiplierMode: in.RechargeMultiplierMode,
 		MonitorEnabled:         in.MonitorEnabled,
 		OnlyCreatedKeyGroupsEnabled: in.OnlyCreatedKeyGroupsEnabled,
-	})
+	}
+	created, err := d.ChannelSvc.Create(createIn)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
+	}
+	if o, ok := onboarder(d); ok && in.PreviewTicket != "" {
+		o.AdoptPreviewSession(created, createIn, in.PreviewTicket)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": channelOutputFor(d, *created)})
 }

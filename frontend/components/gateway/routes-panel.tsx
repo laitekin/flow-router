@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type SetStateAction } from "react"
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react"
 import { Check, ChevronDown, Loader2, Play, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -52,6 +52,7 @@ import {
   sourceGroupOptionValue,
   sourceGroupSelectValue,
 } from "./gateway-utils"
+import { assignRouteTiers, tierLabel, tierTone } from "./route-tiers"
 
 type ChannelOption = { id: number; name: string }
 
@@ -244,6 +245,26 @@ export function RoutesPanel({
   highlightedRouteID,
   stats,
 }: RoutesPanelProps) {
+  // 主备分档：与后端调度一致（不可调度的路由不分档）
+  const tierByIndex = useMemo(() => {
+    const now = Date.now()
+    const entries = assignRouteTiers(
+      sortedRouteRows.map(({ route: r, index, rate }) => {
+        const cooldown = r.id ? routeCooldowns?.[r.id] : undefined
+        const paused = isRouteTempPaused(r.temp_unschedulable_until, now) || hasRouteCooldown(cooldown)
+        return {
+          item: index,
+          index,
+          rate: Number.isFinite(rate) ? rate : 0,
+          weight: r.weight == null ? 1 : Math.max(0, Number(r.weight) || 0),
+          state: r.enabled === false ? ("disabled" as const) : paused ? ("paused" as const) : ("active" as const),
+        }
+      }),
+      rateSort,
+    )
+    return new Map(entries.map((e) => [e.item, e]))
+  }, [sortedRouteRows, routeCooldowns, rateSort])
+
   return (
     <div className="space-y-4">
 <Card className="overflow-hidden border-border shadow-none">
@@ -306,7 +327,11 @@ export function RoutesPanel({
     <p className="text-[11px] leading-5 text-muted-foreground">
       列表顺序 = 尝试顺序：按账号计费倍率
       {rateSort === "desc" ? "从高到低" : "从低到高"}
-      排列；同倍率时权重大优先。
+      排列。同倍率的路由是同一档（
+      <span className={cn("mx-0.5 rounded px-1 py-px text-[10px] font-semibold", tierTone(0).pill)}>主</span>
+      <span className={cn("mx-0.5 rounded px-1 py-px text-[10px] font-semibold", tierTone(1).pill)}>备1</span>
+      <span className={cn("mx-0.5 rounded px-1 py-px text-[10px] font-semibold", tierTone(2).pill)}>备2</span>
+      …），档内按权重分流，整档失败 / 冷却才顺延到下一档。
       {rateResortEnabled
         ? "已在编辑组中开启「渠道分组价格倍率重排」：倍率扫描结束后会按源分组实时倍率自动重写顺序与计费倍率。"
         : "未开启价格倍率重排时，仅保存路由 / 改排序方向会落库顺序；可在编辑组中开启。"}
@@ -335,6 +360,7 @@ export function RoutesPanel({
         </TableHeader>
         <TableBody>
           {sortedRouteRows.map(({ route: r, index: idx }, order) => {
+            const tierEntry = tierByIndex.get(idx)
             const kind = routeSourceKind(r)
             const chId = Number(r.source_channel_id) || 0
             const providerID = Number(r.gateway_provider_id) || 0
@@ -364,7 +390,34 @@ export function RoutesPanel({
                 )}
               >
                 <TableCell className="text-center text-xs tabular-nums text-muted-foreground">
-                  {order + 1}
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span
+                      className={cn(
+                        "rounded px-1 py-px text-[10px] leading-none font-semibold whitespace-nowrap",
+                        tierTone(tierEntry?.tier ?? -1).pill,
+                      )}
+                      title={
+                        tierEntry && tierEntry.tier >= 0
+                          ? tierEntry.tierSize > 1
+                            ? `同档 ${tierEntry.tierSize} 条按权重分流，本条 ${Math.round(tierEntry.share * 100)}%`
+                            : tierEntry.tier === 0
+                              ? "主路由：首选"
+                              : `备用第 ${tierEntry.tier} 档`
+                          : "不参与调度"
+                      }
+                    >
+                      {tierEntry && tierEntry.tier >= 0
+                        ? tierLabel(tierEntry.tier)
+                        : tierEntry?.state === "paused"
+                          ? "冷却"
+                          : "停用"}
+                    </span>
+                    {tierEntry && tierEntry.tierSize > 1 ? (
+                      <span className="text-[9px] text-muted-foreground">{Math.round(tierEntry.share * 100)}%</span>
+                    ) : (
+                      <span className="text-[9px] text-muted-foreground/70">{order + 1}</span>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
                   {r.id ? (

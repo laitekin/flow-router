@@ -44,6 +44,9 @@ type Service struct {
 	// 该集合需要分页拉取上游全部密钥计算，monitor 每次刷新和前端切页都会用到，
 	// 缓存以 channelID 为 key（TTL 见 apiKeyGroupSetTTL）。
 	apiKeyGroupSetCache sync.Map
+
+	// previewTickets 快速导入「连接预览」得到的临时会话（见 onboard.go）。
+	previewTickets sync.Map
 }
 
 func NewService(

@@ -1831,6 +1831,9 @@ export function GatewayPage() {
                         mappingRows={mappingRows}
                         onMappingRowsChange={setMappingRows}
                         modelSuggestions={modelSuggestions}
+                        sourceGroupsByChannel={sourceGroupsByChannel}
+                        providers={providerOptions}
+                        rateDirection={selectedGroup?.rate_sort_direction ?? "asc"}
                       />
                     </TabsContent>
 

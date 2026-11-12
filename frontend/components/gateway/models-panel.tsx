@@ -1,4 +1,4 @@
-import { DatabaseZap, FlaskConical, Loader2, Plus, RefreshCw } from "lucide-react"
+import { ArrowRight, DatabaseZap, FlaskConical, Loader2, Plus, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -28,7 +28,9 @@ import { cn } from "@/lib/utils"
 import type {
   GatewayModelListItem,
   GatewayModelTestResult,
+  GatewayProviderOption,
   GatewayRoute,
+  RateSnapshot,
 } from "@/lib/api-types"
 import {
   ModelMappingEditor,
@@ -36,10 +38,15 @@ import {
 } from "./model-mapping-editor"
 import {
   findSourceTest,
+  formatRate,
+  isRouteTempPaused,
   resolveModelSources,
+  routeEffectiveRate,
   sourceTagTone,
   modelSourceTests,
+  type ModelSourceLabel,
 } from "./gateway-utils"
+import { assignRouteTiers, tierLabel, tierTone, type TierEntry, type TierState } from "./route-tiers"
 
 const MODELS_MODE_OPTIONS = [
   {
@@ -94,6 +101,49 @@ type ModelsPanelProps = {
   mappingRows: MappingRow[]
   onMappingRowsChange: (rows: MappingRow[]) => void
   modelSuggestions: string[]
+  /** 主备分档用：源分组倍率、直连渠道、分组的倍率排序方向 */
+  sourceGroupsByChannel?: Record<number, RateSnapshot[]>
+  providers?: GatewayProviderOption[]
+  rateDirection?: string
+}
+
+type SourceTierEntry = TierEntry<ModelSourceLabel> & { bound: boolean }
+
+/** 按调度顺序给模型的来源分档：主 → 备1 → 备2 …（与后端 SortRoutes 一致） */
+function tierModelSources(
+  sources: ModelSourceLabel[],
+  routes: Partial<GatewayRoute>[],
+  sourceGroupsByChannel: Record<number, RateSnapshot[]>,
+  providers: GatewayProviderOption[],
+  direction: string,
+): SourceTierEntry[] {
+  const byID = new Map(routes.map((r, i) => [r.id, { route: r, index: i }]))
+  const now = Date.now()
+  const inputs = sources.flatMap((s, i) => {
+    const hit = s.route_id != null ? byID.get(s.route_id) : undefined
+    if (!hit) return []
+    const r = hit.route
+    const state: TierState =
+      r.enabled === false ? "disabled" : isRouteTempPaused(r.temp_unschedulable_until, now) ? "paused" : "active"
+    const rate = routeEffectiveRate(r, sourceGroupsByChannel[Number(r.source_channel_id) || 0] ?? [], providers)
+    const weight = r.weight == null ? 1 : Number(r.weight) || 0
+    return [{ item: s, index: hit.index * 1000 + i, rate: Number.isFinite(rate) ? rate : 0, weight, state }]
+  })
+  const tiered = assignRouteTiers(inputs, direction).map((e) => ({ ...e, bound: true }))
+  const placed = new Set(tiered.map((e) => e.item.key))
+  // 没有对应路由的旧数据来源（仅渠道级），排在最后，不参与分档
+  const loose = sources
+    .filter((s) => !placed.has(s.key))
+    .map<SourceTierEntry>((s, i) => ({ item: s, index: i, rate: 0, weight: 0, state: "active", tier: -1, share: 0, tierSize: 0, bound: false }))
+  return [...tiered, ...loose]
+}
+
+function testDot(tr?: GatewayModelTestResult) {
+  if (!tr) return "border border-muted-foreground/50 bg-transparent"
+  if (!tr.ok) return "bg-red-500"
+  if (tr.latency_ms <= 5_000) return "bg-emerald-500"
+  if (tr.latency_ms <= 10_000) return "bg-amber-500"
+  return "bg-orange-500"
 }
 
 export function ModelsPanel({
@@ -119,6 +169,9 @@ export function ModelsPanel({
   mappingRows,
   onMappingRowsChange,
   modelSuggestions,
+  sourceGroupsByChannel = {},
+  providers = [],
+  rateDirection = "asc",
 }: ModelsPanelProps) {
   return (
     <div className="space-y-4">
@@ -204,8 +257,11 @@ export function ModelsPanel({
         <Table className="w-full table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[28%]">模型 ID</TableHead>
-              <TableHead className="w-[42%]">绑定渠道</TableHead>
+              <TableHead className="w-[24%]">模型 ID</TableHead>
+              <TableHead className="w-[46%]">
+                绑定路由 · 主备顺序
+                <span className="ml-1 font-normal text-muted-foreground">（同档按权重分流）</span>
+              </TableHead>
               <TableHead className="w-14 px-1 text-center">状态</TableHead>
               <TableHead className="w-[22%] text-right">操作</TableHead>
             </TableRow>
@@ -245,24 +301,43 @@ export function ModelsPanel({
                         未配置可用路由
                       </span>
                     ) : (
-                      <div className="flex max-w-full flex-wrap content-start gap-1">
-                        {sources.map((s) => {
+                      <div className="flex max-w-full flex-wrap content-start items-center gap-1">
+                        {tierModelSources(sources, routeDrafts, sourceGroupsByChannel, providers, rateDirection).map((entry, i, all) => {
+                          const s = entry.item
                           const tr = findSourceTest(s, tests)
                           const tone = sourceTagTone(tr)
+                          const tt = tierTone(entry.tier)
+                          const prev = all[i - 1]
+                          const tierStart = i > 0 && prev.tier !== entry.tier && entry.tier > 0
                           const tagBusy =
                             s.route_id != null &&
                             isModelTesting(m.id, s.route_id)
+                          const pill =
+                            entry.state === "disabled"
+                              ? "停用"
+                              : entry.state === "paused"
+                                ? "冷却"
+                                : entry.bound
+                                  ? tierLabel(entry.tier)
+                                  : "?"
                           return (
-                            <Tooltip key={s.key}>
+                            <span key={s.key} className="inline-flex max-w-full items-center gap-1">
+                              {tierStart ? (
+                                <ArrowRight
+                                  className="size-3 shrink-0 text-muted-foreground"
+                                  aria-label="失败后顺延"
+                                />
+                              ) : null}
+                            <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
                                   type="button"
                                   disabled={tagBusy}
                                   className={cn(
-                                    "inline-flex max-w-full items-center gap-1 rounded-full border px-1.5 py-0 text-left text-[11px] font-normal transition-colors",
-                                    "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                    "inline-flex max-w-full items-center gap-1 rounded-md border py-0.5 pr-1.5 pl-0.5 text-left text-[11px] font-normal transition-colors",
+                                    "cursor-pointer outline-none hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring",
                                     "disabled:cursor-wait disabled:opacity-80",
-                                    tone.className,
+                                    tt.chip,
                                     tagBusy && "ring-1 ring-primary/40",
                                   )}
                                   onClick={() => {
@@ -273,12 +348,31 @@ export function ModelsPanel({
                                     }
                                   }}
                                 >
+                                  <span
+                                    className={cn(
+                                      "shrink-0 rounded px-1 py-px text-[10px] leading-none font-semibold",
+                                      tt.pill,
+                                    )}
+                                  >
+                                    {pill}
+                                  </span>
                                   {tagBusy ? (
                                     <Loader2 className="size-3 shrink-0 animate-spin" />
-                                  ) : null}
-                                  <span className="min-w-0 break-all">
+                                  ) : (
+                                    <span
+                                      className={cn("size-1.5 shrink-0 rounded-full", testDot(tr))}
+                                      aria-hidden
+                                    />
+                                  )}
+                                  <span className={cn("min-w-0 break-all", entry.tier < 0 && "line-through decoration-muted-foreground/50")}>
                                     {s.label}
                                   </span>
+                                  {entry.bound ? (
+                                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                                      ×{formatRate(entry.rate)}
+                                      {entry.tierSize > 1 ? ` · ${Math.round(entry.share * 100)}%` : ""}
+                                    </span>
+                                  ) : null}
                                 </button>
                               </TooltipTrigger>
                               <TooltipContent
@@ -286,6 +380,19 @@ export function ModelsPanel({
                                 className="max-w-xs space-y-1 p-2.5 text-xs"
                               >
                                 <div className="font-medium">{s.label}</div>
+                                <div>
+                                  {entry.state === "disabled"
+                                    ? "路由已停用，不参与调度"
+                                    : entry.state === "paused"
+                                      ? "冷却中，暂不参与调度"
+                                      : !entry.bound
+                                        ? "未匹配到具体路由"
+                                        : entry.tier === 0
+                                          ? entry.tierSize > 1
+                                            ? `主路由 · 与另外 ${entry.tierSize - 1} 条同倍率路由按权重分流（${Math.round(entry.share * 100)}%）`
+                                            : "主路由 · 首选"
+                                          : `备用第 ${entry.tier} 档 · 前面各档都失败 / 冷却才会用到`}
+                                </div>
                                 {s.sourceTip ? (
                                   <div className="text-muted-foreground">
                                     {s.sourceTip}
@@ -321,6 +428,7 @@ export function ModelsPanel({
                                 ) : null}
                               </TooltipContent>
                             </Tooltip>
+                            </span>
                           )
                         })}
                       </div>
@@ -394,8 +502,31 @@ export function ModelsPanel({
           </TableBody>
         </Table>
       </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        {[0, 1, 2].map((t) => (
+          <span key={t} className="inline-flex items-center gap-1">
+            <span className={cn("rounded px-1 py-px text-[10px] leading-none font-semibold", tierTone(t).pill)}>
+              {tierLabel(t)}
+            </span>
+            {t === 0 ? "首选" : t === 1 ? "主档全挂才用" : "再往后顺延"}
+          </span>
+        ))}
+        <span className="inline-flex items-center gap-1">
+          <span className={cn("rounded px-1 py-px text-[10px] leading-none font-semibold", tierTone(-1).pill)}>冷却</span>
+          停用 / 冷却中不参与
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-1.5 rounded-full bg-emerald-500" />可用
+          <span className="size-1.5 rounded-full bg-amber-500" />慢
+          <span className="size-1.5 rounded-full bg-red-500" />失败
+          <span className="size-1.5 rounded-full border border-muted-foreground/50" />未测
+        </span>
+      </div>
       <ul className="w-full max-w-full space-y-0.5 text-[11px] leading-5 text-muted-foreground">
-        <li>仅展示该模型绑定的启用线路。颜色为最近一次测试结果，点击渠道可重新测试。</li>
+        <li>
+          主备按有效倍率{rateDirection === "desc" ? "从高到低" : "从低到高"}自动分档（与网关实际调度一致）：同倍率是同一档、按权重分流；前一档全部失败或冷却才顺延到下一档。想调整主备，改路由倍率或在「渠道路由」里调顺序。
+        </li>
+        <li>圆点为最近一次测试结果，点击路由可直接重新测试。</li>
         {modelItems.some((m) => m.source === "custom" && !m.sources?.some((s) => s.route_id)) ? (
           <li>未限定线路的旧自定义模型沿用分组默认线路。</li>
         ) : null}

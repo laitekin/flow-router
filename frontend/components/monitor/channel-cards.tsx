@@ -10,6 +10,7 @@ import {
   CreditCard,
   ExternalLink,
   KeyRound,
+  Layers,
   Loader2,
   LogIn,
   MoreHorizontal,
@@ -61,6 +62,8 @@ import { cn } from "@/lib/utils"
 import { syncAllChannelsStream, syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
 import type { Channel, ChannelRedeemResult, RateSnapshot } from "@/lib/api-types"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
+import { ChannelCatalogDialog } from "@/components/monitor/channel-catalog-dialog"
+import { useAddChannel } from "@/lib/add-channel-context"
 import { ChannelRedeemDialog } from "@/components/monitor/channel-redeem-dialog"
 import { ChannelRechargeDialog } from "@/components/monitor/channel-recharge-dialog"
 import {
@@ -587,6 +590,8 @@ export function ChannelCards() {
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [editing, setEditing] = useState<Channel | null>(null)
   const [creating, setCreating] = useState(false)
+  const { openAdd } = useAddChannel()
+  const [catalogChannel, setCatalogChannel] = useState<Channel | null>(null)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [redeeming, setRedeeming] = useState<Channel | null>(null)
   const [recharging, setRecharging] = useState<Channel | null>(null)
@@ -826,13 +831,10 @@ export function ChannelCards() {
           <Button
             size="sm"
             className="gap-1.5 text-xs"
-            onClick={() => {
-              setEditing(null)
-              setCreating(true)
-            }}
+            onClick={openAdd}
           >
             <Plus className="size-3.5" />
-            {"新增"}
+            {"导入渠道"}
           </Button>
         </div>
       </div>
@@ -847,13 +849,10 @@ export function ChannelCards() {
           <Button
             size="sm"
             className="mt-3 gap-1.5"
-            onClick={() => {
-              setEditing(null)
-              setCreating(true)
-            }}
+            onClick={openAdd}
           >
             <Plus className="size-3.5" />
-            {"添加第一个渠道"}
+            {"导入第一个渠道"}
           </Button>
         </div>
       ) : (
@@ -1032,6 +1031,10 @@ export function ChannelCards() {
                         >
                           <LogIn className="size-3.5" />
                           {"测试登录"}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setCatalogChannel(c)}>
+                          <Layers className="size-3.5" />
+                          {"分组与模型"}
                         </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => setRecharging(c)}>
                           <CreditCard className="size-3.5" />
@@ -1219,6 +1222,13 @@ export function ChannelCards() {
               },
             },
           })
+        }}
+      />
+
+      <ChannelCatalogDialog
+        channel={catalogChannel}
+        onOpenChange={(v) => {
+          if (!v) setCatalogChannel(null)
         }}
       />
 
