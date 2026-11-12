@@ -1,4 +1,4 @@
-import type { GatewayProbeRequest, GatewayProbeRound, GatewayProbeSample } from "../../lib/api-types"
+import type { GatewayImageOptions, GatewayProbeRequest, GatewayProbeRound, GatewayProbeSample } from "../../lib/api-types"
 
 /**
  * A probe template describes one kind of model experiment. The backend only
@@ -43,6 +43,59 @@ export interface ProbeTemplate {
   needleDepth: number
   /** image 协议的生图尺寸，空 = 1024x1024 */
   imageSize?: string
+  /** image 协议的 gpt-image 参数；空字段不发送 */
+  imageOptions?: GatewayImageOptions
+}
+
+export const IMAGE_SIZE_PATTERN = /^(auto|\d{3,4}x\d{3,4})$/
+
+/** gpt-image-2 系任意尺寸规则：边长 16 的倍数、长宽比 ≤ 3:1、最大 3840x2160（>2560x1440 为实验性） */
+export function imageSizeHint(size: string | undefined): string | null {
+  const m = /^(\d+)x(\d+)$/.exec(size ?? "")
+  if (!m) return null
+  const w = Number(m[1]), h = Number(m[2])
+  if (w % 16 || h % 16) return "gpt-image-2 系要求宽高都是 16 的倍数"
+  if (Math.max(w, h) / Math.min(w, h) > 3) return "长宽比需在 1:3 到 3:1 之间"
+  if (Math.max(w, h) > 3840 || Math.min(w, h) > 2160) return "超出 3840x2160 上限"
+  if (w * h > 2560 * 1440) return "超过 2560x1440，官方标为实验性"
+  return null
+}
+
+function normalizeImageOptions(raw: unknown): GatewayImageOptions | undefined {
+  if (!raw || typeof raw !== "object") return undefined
+  const r = raw as Record<string, unknown>
+  const pick = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined => (allowed as readonly unknown[]).includes(v) ? (v as T) : undefined
+  const int = (v: unknown, lo: number, hi: number) => (typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined)
+  const out: GatewayImageOptions = {
+    quality: pick(r.quality, ["auto", "low", "medium", "high", "xhigh", "max"] as const),
+    background: pick(r.background, ["auto", "opaque", "transparent"] as const),
+    output_format: pick(r.output_format, ["png", "jpeg", "webp", "gif", "svg"] as const),
+    output_compression: int(r.output_compression, 0, 100),
+    n: int(r.n, 1, 10),
+    moderation: pick(r.moderation, ["auto", "low"] as const),
+    frame_count: int(r.frame_count, 2, 16),
+    frame_duration_ms: int(r.frame_duration_ms, 20, 655_350),
+  }
+  const clean = cleanImageOptions(out)
+  return clean
+}
+
+/** 去掉空值与当前格式下无效的字段（与后端校验一致，避免请求被拒） */
+export function cleanImageOptions(o: GatewayImageOptions | undefined): GatewayImageOptions | undefined {
+  if (!o) return undefined
+  const fmt = o.output_format
+  const out: GatewayImageOptions = {}
+  if (o.quality) out.quality = o.quality
+  if (o.background && !(o.background === "transparent" && fmt && fmt !== "png" && fmt !== "webp")) out.background = o.background
+  if (fmt) out.output_format = fmt
+  if (o.output_compression != null && (fmt === "jpeg" || fmt === "webp")) out.output_compression = o.output_compression
+  if (o.n && o.n > 1 && fmt !== "svg") out.n = o.n
+  if (o.moderation) out.moderation = o.moderation
+  if (fmt === "gif") {
+    if (o.frame_count) out.frame_count = o.frame_count
+    if (o.frame_duration_ms) out.frame_duration_ms = o.frame_duration_ms
+  }
+  return Object.keys(out).length ? out : undefined
 }
 
 export const VIEW_LABELS: Record<ProbeView, string> = {
@@ -168,6 +221,56 @@ const BUILTIN_LIST: ProbeTemplate[] = [
   },
   {
     ...BASE,
+    id: "builtin:image-transparent",
+    name: "生图 · 透明背景",
+    description: "gpt-image 系透明背景 PNG（贴纸 / 图标），检查上游是否保留 alpha 通道。",
+    kind: "prompt",
+    view: "image",
+    protocol: "image",
+    prompt: "A glossy sticker of a cartoon fox head, thick white outline, no background.",
+    timeoutSec: 240,
+    imageOptions: { background: "transparent", output_format: "png", quality: "medium" },
+  },
+  {
+    ...BASE,
+    id: "builtin:image-wide",
+    name: "生图 · 超宽 2K",
+    description: "gpt-image-2 系任意尺寸：2560x1440 横幅 + 中文排版，检验大图与文字渲染。",
+    kind: "prompt",
+    view: "image",
+    protocol: "image",
+    prompt: "A cinematic banner for a coffee brand named 「山间咖啡」, misty mountains at dawn, the brand name rendered clearly in elegant Chinese calligraphy.",
+    timeoutSec: 300,
+    imageSize: "2560x1440",
+    imageOptions: { quality: "high", output_format: "jpeg", output_compression: 85 },
+  },
+  {
+    ...BASE,
+    id: "builtin:image-gif",
+    name: "生图 · GIF 动图",
+    description: "output_format=gif（需上游开通 GIF 预览），检验多帧动图能否正常返回。",
+    kind: "prompt",
+    view: "image",
+    protocol: "image",
+    prompt: "A paper airplane looping through the sky, simple flat style, seamless loop.",
+    timeoutSec: 300,
+    imageSize: "1024x1024",
+    imageOptions: { output_format: "gif", frame_count: 8, frame_duration_ms: 150, quality: "low" },
+  },
+  {
+    ...BASE,
+    id: "builtin:image-svg",
+    name: "生图 · SVG 矢量",
+    description: "output_format=svg（需上游开通），返回矢量图，检验 SVG 输出与渲染。",
+    kind: "prompt",
+    view: "image",
+    protocol: "image",
+    prompt: "A minimalist line-art logo of a lighthouse, two colors.",
+    timeoutSec: 300,
+    imageOptions: { output_format: "svg" },
+  },
+  {
+    ...BASE,
     id: "builtin:custom",
     name: "自定义",
     description: "自己写系统提示词和问题，可选呈现方式与自动校验（包含文本或 /正则/）。",
@@ -228,7 +331,8 @@ export function normalizeTemplate(raw: Partial<ProbeTemplate> & Record<string, u
     changedRounds: clampInt(raw.changedRounds, L.changedRounds[0], L.changedRounds[1], BASE.changedRounds),
     haystackTokens: clampInt(raw.haystackTokens, L.haystackTokens[0], L.haystackTokens[1], BASE.haystackTokens),
     needleDepth: clampInt(raw.needleDepth, L.needleDepth[0], L.needleDepth[1], BASE.needleDepth),
-    imageSize: /^(auto|\d{3,4}x\d{3,4})$/.test(str(raw.imageSize, 16).trim()) ? str(raw.imageSize, 16).trim() : undefined,
+    imageSize: IMAGE_SIZE_PATTERN.test(str(raw.imageSize, 16).trim()) ? str(raw.imageSize, 16).trim() : undefined,
+    imageOptions: normalizeImageOptions(raw.imageOptions),
   }
 }
 
@@ -312,6 +416,7 @@ export function buildProbeRequest(t: ProbeTemplate, plan: ProbePlan, model: stri
     route_id: routeID,
     protocol: t.protocol,
     ...(t.imageSize ? { image_size: t.imageSize } : {}),
+    ...(t.protocol === "image" && cleanImageOptions(t.imageOptions) ? { image_options: cleanImageOptions(t.imageOptions) } : {}),
     rounds: plan.rounds,
     interval_sec: t.intervalSec,
     max_tokens: t.maxTokens,

@@ -71,6 +71,17 @@ function Checks({ checks }: { checks: ProbeCheck[] }) {
 }
 
 function Metrics({ s }: { s: GatewayProbeSample }) {
+  if (s.image_info || (s.images?.length ?? 0) > 0) {
+    const n = s.images?.length ?? 0
+    const img = [
+      `出图 ${n} 张`,
+      `耗时 ${sec(s.duration_ms)}`,
+      n > 1 ? `平均 ${sec(Math.round(s.duration_ms / n))}/张` : null,
+      s.input_tokens != null ? `输入 ${num(s.input_tokens)} tok` : null,
+      s.output_tokens != null ? `输出 ${num(s.output_tokens)} tok` : null,
+    ].filter(Boolean)
+    return <div className="text-[11px] tabular-nums text-muted-foreground">{img.join(" · ")}</div>
+  }
   const parts = [
     `首字 ${sec(s.first_text_ms)}`,
     s.first_token_ms != null && s.first_token_ms !== s.first_text_ms ? `首 token ${sec(s.first_token_ms)}` : null,
@@ -110,17 +121,36 @@ function SampleBody({ run, s }: { run: ProbeRun; s: GatewayProbeSample }) {
   if (view === "image" || (s.images?.length ?? 0) > 0) {
     // 只渲染 http(s) 与 data:image/，避免上游塞入 javascript: 等 URL
     const images = (s.images ?? []).filter((src) => /^(https?:\/\/|data:image\/)/i.test(src))
+    const info = s.image_info
+    const meta = [
+      info?.size,
+      info?.output_format?.toUpperCase(),
+      info?.quality ? `质量 ${info.quality}` : null,
+      info?.background === "transparent" ? "透明背景" : null,
+      info?.output_image_tokens != null ? `出图 ${info.output_image_tokens.toLocaleString()} tok` : null,
+      info?.input_image_tokens ? `参考图 ${info.input_image_tokens.toLocaleString()} tok` : null,
+    ].filter(Boolean)
+    // 棋盘格底，透明通道一眼可见
+    const checker = "bg-[length:16px_16px] bg-[position:0_0,8px_8px] bg-[image:linear-gradient(45deg,rgba(127,127,127,.18)_25%,transparent_25%,transparent_75%,rgba(127,127,127,.18)_75%),linear-gradient(45deg,rgba(127,127,127,.18)_25%,transparent_25%,transparent_75%,rgba(127,127,127,.18)_75%)]"
+    const ext = (src: string) => /^data:image\/(svg\+xml|jpeg|webp|gif|png)/i.exec(src)?.[1]?.replace("svg+xml", "svg").replace("jpeg", "jpg") ?? "png"
     return (
-      <div className="space-y-1">
-        {images.map((src, i) =>
-          src.startsWith("data:") ? (
-            <img key={i} src={src} alt={`${run.label ?? ""} ${s.label} 图片 ${i + 1}`} className="w-full rounded border bg-muted object-contain" />
-          ) : (
-            <a key={i} href={src} target="_blank" rel="noreferrer noopener" title="新标签页打开原图" className="block">
-              <img src={src} referrerPolicy="no-referrer" alt={`${run.label ?? ""} ${s.label} 图片 ${i + 1}`} className="w-full rounded border bg-muted object-contain" />
-            </a>
-          ),
-        )}
+      <div className="space-y-1.5">
+        {meta.length ? <div className="text-[11px] text-muted-foreground tabular-nums">{meta.join(" · ")}</div> : null}
+        <div className={cn("grid gap-1.5", images.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+          {images.map((src, i) => {
+            const bytes = info?.bytes?.[i]
+            const kb = bytes ? (bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`) : null
+            const img = <img src={src} referrerPolicy="no-referrer" alt={`${run.label ?? ""} ${s.label} 图片 ${i + 1}`} className={cn("w-full rounded border object-contain", checker)} />
+            return (
+              <figure key={i} className="space-y-0.5">
+                <a href={src} target="_blank" rel="noreferrer noopener" title="新标签页打开原图" className="block" {...(src.startsWith("data:") ? { download: `image-${s.round}-${i + 1}.${ext(src)}` } : {})}>
+                  {img}
+                </a>
+                {kb ? <figcaption className="text-[10px] text-muted-foreground tabular-nums">{kb}</figcaption> : null}
+              </figure>
+            )
+          })}
+        </div>
         {s.images_truncated ? <div className="text-[11px] text-muted-foreground">部分图片过大未回传</div> : null}
         {s.text ? <div className="text-[11px] text-muted-foreground">改写后的提示词：{s.text}</div> : null}
       </div>
