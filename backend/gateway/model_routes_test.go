@@ -44,3 +44,25 @@ func TestFilterModelRoutesRejectsForeignModel(t *testing.T) {
 		t.Fatalf("uncatalogued legacy group unexpectedly blocked: %#v", got)
 	}
 }
+
+func TestAdminTestRoutesAllowUnsyncedModelOnExplicitRoute(t *testing.T) {
+	routes := []storage.GatewayRoute{{ID: 1}, {ID: 2}}
+	items := []ModelListItem{{ID: "gpt-6-sol", Sources: []ModelSource{{RouteID: 1}}}}
+
+	// Unsynced model, explicit route: the admin may test it directly.
+	if got := adminTestRoutesForModel(routes, items, "deepseek-v4-flash", true); len(got) != 2 {
+		t.Fatalf("explicit test of unsynced model blocked: %#v", got)
+	}
+	// Batch test (no explicit route) keeps the allowlist.
+	if got := adminTestRoutesForModel(routes, items, "deepseek-v4-flash", false); len(got) != 0 {
+		t.Fatalf("batch test bypassed the catalog allowlist: %#v", got)
+	}
+	// Saved model: bindings stay authoritative even for explicit tests.
+	if got := adminTestRoutesForModel(routes, items, "gpt-6-sol", true); len(got) != 1 || got[0].ID != 1 {
+		t.Fatalf("saved bindings not respected: %#v", got)
+	}
+	// Public routing is unchanged.
+	if got := filterRoutesForModel(routes, items, "deepseek-v4-flash"); len(got) != 0 {
+		t.Fatalf("forwarding allowlist changed: %#v", got)
+	}
+}

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>{{.Title}}</title>
+<style>
+body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}table{border-collapse:collapse}a{color:#2563eb}
+@media only screen and (max-width:600px){
+.outer{padding:32px 20px 40px!important}.headline{font-size:21px!important}
+.metric{display:block!important;width:auto!important;padding:14px 0 0!important}.metric-value{font-size:24px!important}
+.kv-label{width:72px!important}
+}
+@media (prefers-color-scheme:dark){
+.email-bg{background-color:#0a0a0a!important}.ink{color:#ededed!important}.muted{color:#a1a1a1!important}
+.rule{border-color:#262626!important}
+.btn{background-color:#3b82f6!important}.link{color:#60a5fa!important}.code{background-color:#1a1a1a!important;color:#d4d4d4!important}
+.mail-body td,.mail-body p{color:#d4d4d4!important}.mail-body a{color:#60a5fa!important}
+}
+</style>
+</head>
+<body class="email-bg" style="margin:0;padding:0;background-color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei','Helvetica Neue',Arial,sans-serif;color:#0a0a0a;-webkit-font-smoothing:antialiased;">
+<div style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{{.Preheader}}</div>
+<table role="presentation" width="100%" class="email-bg" bgcolor="#ffffff" style="width:100%;background-color:#ffffff;">
+<tr><td align="center" class="outer" style="padding:56px 24px 56px;">
+<!--[if mso]><table role="presentation" width="540"><tr><td><![endif]-->
+<table role="presentation" width="100%" style="width:100%;max-width:540px;">
+
+<!-- Wordmark -->
+<tr><td style="padding:0 0 40px;">
+<table role="presentation"><tr>
+<td width="22" height="22" style="width:22px;height:22px;line-height:0;"><img src="{{.LogoSrc}}" width="22" height="22" alt="" style="display:block;width:22px;height:22px;border:0;outline:none;"></td>
+<td class="ink" style="padding-left:10px;font-size:14px;line-height:20px;font-weight:600;letter-spacing:-0.1px;color:#0a0a0a;">Flow Router</td>
+</tr></table>
+</td></tr>
+
+<!-- Status line -->
+<tr><td class="muted" style="padding:0 0 12px;font-size:13px;line-height:20px;color:#737373;">
+<span style="display:inline-block;width:7px;height:7px;border-radius:4px;background-color:{{.Theme.Color}};vertical-align:1px;"></span>&nbsp;&nbsp;<span style="color:{{.Theme.Color}};font-weight:500;">{{.Theme.Label}}</span>&nbsp;&nbsp;·&nbsp;&nbsp;{{.Date}}
+</td></tr>
+
+<!-- Headline -->
+<tr><td>
+<h1 class="headline ink" style="margin:0 0 10px;font-size:24px;line-height:1.35;font-weight:600;letter-spacing:-0.4px;color:#0a0a0a;overflow-wrap:anywhere;word-break:break-word;">{{.Title}}</h1>
+<p class="muted" style="margin:0;font-size:15px;line-height:1.65;color:#525252;">{{.Description}}</p>
+</td></tr>
+
+{{if .Metrics}}<!-- Figures -->
+<tr><td style="padding:32px 0 0;">
+<table role="presentation" width="100%" class="rule" style="width:100%;border-top:1px solid #e5e5e5;table-layout:fixed;"><tr>
+{{range $i, $m := .Metrics}}<td valign="top" width="{{$.MetricWidth}}" class="metric" style="padding:20px 16px 0 0;">
+<p class="muted" style="margin:0 0 6px;font-size:12px;line-height:18px;color:#737373;">{{$m.Label}}</p>
+<p class="metric-value ink" style="margin:0;font-size:28px;line-height:1.15;font-weight:500;letter-spacing:-0.8px;color:#0a0a0a;font-variant-numeric:tabular-nums;white-space:nowrap;">{{$m.Value}}<span class="muted" style="font-size:13px;font-weight:400;letter-spacing:0;color:#737373;">&nbsp;{{$m.Unit}}</span></p>
+{{if $m.Note}}<p class="muted" style="margin:6px 0 0;font-size:12px;line-height:18px;color:#737373;">{{$m.Note}}</p>{{end}}
+</td>{{end}}
+</tr></table>
+</td></tr>{{end}}
+
+<!-- Details -->
+<tr><td class="mail-body" style="padding:32px 0 0;font-size:14px;line-height:1.7;color:#262626;overflow-wrap:anywhere;word-break:break-word;">{{.Body}}</td></tr>
+
+{{if .ActionURL}}<!-- Actions -->
+<tr><td style="padding:16px 0 0;">
+<table role="presentation"><tr>
+<td class="btn" bgcolor="{{.Brand}}" style="background-color:{{.Brand}};border-radius:6px;mso-padding-alt:10px 18px;"><a href="{{.ActionURL}}" target="_blank" style="display:inline-block;padding:10px 18px;font-size:14px;line-height:20px;font-weight:500;color:#ffffff;text-decoration:none;">{{.ActionLabel}}</a></td>
+{{if .SecondaryURL}}<td style="padding-left:20px;"><a href="{{.SecondaryURL}}" target="_blank" class="link" style="font-size:14px;line-height:20px;font-weight:500;color:{{.Brand}};text-decoration:none;">{{.SecondaryLabel}}&nbsp;→</a></td>{{end}}
+</tr></table>
+</td></tr>{{end}}
+
+<!-- Footer -->
+<tr><td style="padding:48px 0 0;">
+<table role="presentation" width="100%" class="rule" style="width:100%;border-top:1px solid #e5e5e5;"><tr>
+<td class="muted" style="padding-top:20px;font-size:12px;line-height:1.7;color:#a3a3a3;">Flow Router · 渠道运营与路由监测<br>你收到此邮件，是因为订阅了渠道运营通知。可在控制台「通知设置」中调整。</td>
+</tr></table>
+</td></tr>
+
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr></table>
+</body></html>

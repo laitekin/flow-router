@@ -748,6 +748,29 @@ export interface GatewayModelListItem {
   sources?: GatewayModelSource[]
 }
 
+export interface GatewayModelPreviewItem {
+  id: string
+  channel_ids?: number[]
+  sources?: GatewayModelSource[]
+}
+
+/** 单条路由拉取 /v1/models 的结果（失败不影响其他路由） */
+export interface GatewayModelRoutePull {
+  route_id: number
+  source_kind: string
+  label: string
+  ok: boolean
+  skipped: boolean
+  model_count: number
+  error?: string
+  skip_reason?: string
+}
+
+export interface GatewayModelPreviewResponse {
+  items: GatewayModelPreviewItem[]
+  routes?: GatewayModelRoutePull[]
+}
+
 export interface GatewayCatalogModel {
   model_name: string
   description?: string

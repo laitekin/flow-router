@@ -142,7 +142,7 @@ func (s *Service) pullRouteModels(ctx context.Context, group *storage.GatewayGro
 }
 
 // PreviewGroupModels 预览分组可聚合的模型清单（不落库）。
-func (s *Service) PreviewGroupModels(ctx context.Context, groupID uint) ([]ModelPreviewItem, error) {
+func (s *Service) PreviewGroupModels(ctx context.Context, groupID uint) ([]ModelPreviewItem, []ModelSyncRouteResult, error) {
 	return s.admin().PreviewGroupModels(ctx, groupID)
 }
 

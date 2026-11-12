@@ -303,10 +303,9 @@ func (a *AdminService) pullRouteModels(ctx context.Context, group *storage.Gatew
 	return routeModelPull{rr: rr, models: models, src: src, merge: true}
 }
 
-// PreviewGroupModels 预览聚合模型。
-func (a *AdminService) PreviewGroupModels(ctx context.Context, groupID uint) ([]ModelPreviewItem, error) {
-	preview, _, err := a.collectGroupModels(ctx, groupID)
-	return preview, err
+// PreviewGroupModels 预览聚合模型；同时返回逐路由拉取结果，便于前端说明哪条路由失败。
+func (a *AdminService) PreviewGroupModels(ctx context.Context, groupID uint) ([]ModelPreviewItem, []ModelSyncRouteResult, error) {
+	return a.collectGroupModels(ctx, groupID)
 }
 
 // SyncGroupModelsInput 同步组模型时可附带前端本地尚未落库的自定义模型。
@@ -428,7 +427,7 @@ func (a *AdminService) TestGroupModel(ctx context.Context, groupID uint, in Test
 	if err != nil {
 		return nil, err
 	}
-	routes = filterRoutesForModel(routes, a.ParseModelsJSON(group.ModelsJSON), model)
+	routes = adminTestRoutesForModel(routes, a.ParseModelsJSON(group.ModelsJSON), model, in.RouteID != nil)
 	groupMapping := ParseModelMapping(group.ModelMappingJSON)
 	now := time.Now()
 
