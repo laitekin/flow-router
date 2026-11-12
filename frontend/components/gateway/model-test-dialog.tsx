@@ -28,8 +28,16 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { apiFetch } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import type { GatewayModelListItem, GatewayModelTestResult, GatewayRoute } from "@/lib/api-types"
+import type {
+  GatewayModelListItem,
+  GatewayModelPreviewResponse,
+  GatewayModelTestResult,
+  GatewayRoute,
+} from "@/lib/api-types"
+import { failedRoutePulls, mergeBenchModels } from "./model-bench-catalog"
+import { ModelBenchPicker } from "./model-bench-picker"
 import { findSourceTest, modelSourceTests, resolveModelSources, type ModelSourceLabel } from "./gateway-utils"
 import {
   PROBE_LIMITS,
@@ -222,6 +230,8 @@ export function ModelTestDialog({
   open,
   onOpenChange,
   modelTestTarget,
+  groupID,
+  savedModels,
   routeDrafts,
   channelNameByID,
   providerNameByID,
@@ -229,7 +239,11 @@ export function ModelTestDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** model preselected when the bench opens; null opens it with the picker only */
   modelTestTarget: GatewayModelListItem | null
+  groupID?: number
+  /** the group's model list as configured on the page */
+  savedModels: GatewayModelListItem[]
   routeDrafts: Partial<GatewayRoute>[]
   channelNameByID: Map<number, string>
   providerNameByID?: Map<number, string>
@@ -255,24 +269,51 @@ export function ModelTestDialog({
     }
   })
 
+  // ---------- model picker: saved models ∪ models reported by each enabled route ----------
+  const [pickedID, setPickedID] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ groupID?: number; data?: GatewayModelPreviewResponse; error?: string; loading: boolean }>({ loading: false })
+  const [reloadTick, setReloadTick] = useState(0)
+  useEffect(() => {
+    if (open) setPickedID(modelTestTarget?.id ?? null)
+  }, [open, modelTestTarget?.id])
+  useEffect(() => {
+    if (!open || !groupID) return
+    const controller = new AbortController()
+    // Keep the previous list for the same group visible while refreshing.
+    setPreview((prev) => ({ groupID, data: prev.groupID === groupID ? prev.data : undefined, loading: true }))
+    apiFetch<GatewayModelPreviewResponse>(`/gateway/groups/${groupID}/models/preview`, { signal: controller.signal })
+      .then((data) => setPreview({ groupID, data, loading: false }))
+      .catch((e) => {
+        if (controller.signal.aborted) return
+        setPreview((prev) => ({ ...prev, groupID, loading: false, error: e instanceof Error ? e.message : "读取失败" }))
+      })
+    return () => controller.abort()
+  }, [open, groupID, reloadTick])
+  const previewData = preview.groupID === groupID ? preview.data : undefined
+  const benchModels = useMemo(() => mergeBenchModels(savedModels, previewData?.items ?? []), [savedModels, previewData])
+  const failedRoutes = useMemo(() => failedRoutePulls(previewData?.routes), [previewData])
+  const target: GatewayModelListItem | null =
+    benchModels.find((m) => m.item.id === pickedID)?.item ??
+    (modelTestTarget && modelTestTarget.id === pickedID ? modelTestTarget : null)
+
   useEffect(() => saveLastTemplateID(selectedID), [selectedID])
-  useEffect(() => setUnchecked(new Set()), [modelTestTarget?.id])
+  useEffect(() => setUnchecked(new Set()), [target?.id])
 
   const base = templates.find((t) => t.id === selectedID)
   const draft = base ? drafts[base.id] ?? base : undefined
   const dirty = !!base && !!drafts[base.id] && JSON.stringify(drafts[base.id]) !== JSON.stringify(base)
   const isAvailability = selectedID === AVAILABILITY
 
-  const model = modelTestTarget?.id ?? ""
+  const model = target?.id ?? ""
   const sources = useMemo(
-    () => (modelTestTarget ? resolveModelSources(modelTestTarget, routeDrafts, channelNameByID, providerNameByID) : []),
-    [modelTestTarget, routeDrafts, channelNameByID, providerNameByID],
+    () => (target ? resolveModelSources(target, routeDrafts, channelNameByID, providerNameByID) : []),
+    [target, routeDrafts, channelNameByID, providerNameByID],
   )
   const availResults = useMemo(() => modelSourceTests(sources, tests.results[model] ?? []), [sources, tests.results, model])
   const runnable = sources.filter((s): s is ModelSourceLabel & { route_id: number } => s.route_id != null)
   const checked = runnable.filter((s) => !unchecked.has(s.key))
   const estimate = useMemo(() => (draft ? buildProbePlan(draft, "estimate").estimatedInputTokens : 0), [draft])
-  const anyBusy = modelTestTarget ? tests.isTesting(model) : false
+  const anyBusy = target ? tests.isTesting(model) : false
 
   const patchDraft = (patch: Partial<ProbeTemplate>) => {
     if (!draft) return
@@ -331,7 +372,7 @@ export function ModelTestDialog({
   }
 
   function runOn(routeIDs: number[]) {
-    if (!modelTestTarget || !routeIDs.length) return
+    if (!target || !routeIDs.length) return
     if (isAvailability) tests.run(model, routeIDs)
     else if (draft) tests.runProbe(model, routeIDs, normalizeTemplate({ ...draft }))
   }
@@ -346,16 +387,26 @@ export function ModelTestDialog({
             模型测试台
           </DialogTitle>
           <DialogDescription className="min-w-0 break-words">
-            {modelTestTarget ? (
+            {target ? (
               <>
                 <code className="inline-block max-w-full break-all rounded bg-muted px-1 text-xs">{model}</code>
                 {" "}· 选择测试类型、调整参数，在多个渠道上并发运行并对比。关闭弹窗后测试继续；刷新或离开网关页会停止。
               </>
-            ) : "选择模型后测试"}
+            ) : "选择一个模型：已保存的模型，或分组内各启用路由上报的模型。"}
           </DialogDescription>
         </DialogHeader>
 
-        {modelTestTarget ? (
+        <ModelBenchPicker
+          models={benchModels}
+          value={pickedID}
+          onChange={setPickedID}
+          loading={preview.loading && preview.groupID === groupID}
+          error={preview.groupID === groupID ? preview.error : undefined}
+          failedRoutes={failedRoutes}
+          onRefresh={() => setReloadTick((n) => n + 1)}
+        />
+
+        {target ? (
           <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)] lg:overflow-hidden">
             {/* ---------- left: test type + parameters ---------- */}
             <section className="min-w-0 space-y-3 lg:overflow-y-auto lg:pr-1" aria-label="测试设置">
@@ -544,7 +595,11 @@ export function ModelTestDialog({
               </div>
             </section>
           </div>
-        ) : null}
+        ) : (
+          <div className="rounded-md border border-dashed px-4 py-12 text-center text-sm text-muted-foreground">
+            {preview.loading && !benchModels.length ? "正在读取各路由上报的模型…" : "从上方选择要测试的模型"}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   )

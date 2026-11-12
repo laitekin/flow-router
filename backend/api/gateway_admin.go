@@ -550,12 +550,18 @@ func previewGatewayGroupModels(c *gin.Context, d *Deps) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	list, err := d.Gateway.PreviewGroupModels(c.Request.Context(), id)
+	list, routes, err := d.Gateway.PreviewGroupModels(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": list})
+	if list == nil {
+		list = []gateway.ModelPreviewItem{}
+	}
+	if routes == nil {
+		routes = []gateway.ModelSyncRouteResult{}
+	}
+	c.JSON(http.StatusOK, gin.H{"items": list, "routes": routes})
 }
 
 func listGatewayModelCatalog(c *gin.Context, d *Deps) {

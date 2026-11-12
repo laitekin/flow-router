@@ -198,7 +198,7 @@ func (a *AdminService) probeModel(parent context.Context, groupID uint, in Model
 		return err
 	}
 	var selected *storage.GatewayRoute
-	for _, route := range filterRoutesForModel(routes, a.ParseModelsJSON(group.ModelsJSON), in.Model) {
+	for _, route := range adminTestRoutesForModel(routes, a.ParseModelsJSON(group.ModelsJSON), in.Model, true) {
 		if route.ID == in.RouteID {
 			cp := route
 			selected = &cp
